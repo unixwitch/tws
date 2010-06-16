@@ -231,7 +231,7 @@ request_free(
 		return;
 
 	g_hash_table_destroy(request->headers);
-	free(request->method);
+	free(request->method_str);
 	free(request);
 }
 
@@ -373,8 +373,8 @@ request_t	*req = client->request;
 		return -1;
 
 	/* Read method */
-	req->method = strdup(line);
-	if ((req->url = strchr(req->method, ' ')) == NULL) {
+	req->method_str = strdup(line);
+	if ((req->url = strchr(req->method_str, ' ')) == NULL) {
 		/* Invalid request */
 		client_close(client);
 		return -1;
@@ -399,6 +399,17 @@ request_t	*req = client->request;
 		client_close(client);
 		return -1;
 	}
+
+	if (!strcmp(req->method_str, "GET"))
+		req->method = M_GET;
+	else if (!strcmp(req->method_str, "PUT"))
+		req->method = M_PUT;
+	else if (!strcmp(req->method_str, "POST"))
+		req->method = M_POST;
+	else if (!strcmp(req->method_str, "HEAD"))
+		req->method = M_HEAD;
+	else
+		req->method = M_UNKNOWN;
 
 	client->state = READ_HEADERS;
 	return 0;

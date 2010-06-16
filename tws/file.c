@@ -169,6 +169,13 @@ next:
 		return;
 	}
 
+	/* We only support GET and HEAD for files */
+	if (req->method != M_GET && req->method != M_HEAD) {
+		client_error(client, 403);
+		free_request(freq);
+		return;
+	}
+
 	if ((freq->fd = open(freq->filename, O_RDONLY)) == -1) {
 		log_error("%s: %s", freq->filename, strerror(errno));
 
@@ -250,6 +257,11 @@ headers_done(
 	if (error) {
 		log_error("write: %s", strerror(error));
 		free_request(client->hdldata);
+		client_close(client);
+		return;
+	}
+
+	if (client->request->method == M_HEAD) {
 		client_close(client);
 		return;
 	}

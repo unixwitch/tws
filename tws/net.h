@@ -39,11 +39,23 @@ typedef enum {
 	HTTP_11
 } http_version_t;
 
+/*
+ * These are request types that we have special handling for.
+ */
+typedef enum {
+	M_UNKNOWN,
+	M_GET,
+	M_PUT,
+	M_POST,
+	M_HEAD,
+} http_method_t;
+
 typedef struct {
 	GHashTable		*headers;
-	char			*method;
+	char			*method_str;
 	char			*url;
 	http_version_t		 version;
+	http_method_t		 method;
 } request_t;
 
 	request_t	*request_new(void);

@@ -64,7 +64,7 @@ gpointer	 key, value;
 	    add_env(env, "SERVER_PROTOCOL",
 		    client->request->version == HTTP_10 ? "HTTP/1.0" : "HTTP/1.1") == -1 ||
 	    add_env(env, "SCRIPT_FILENAME", req->filename) == -1 ||
-	    add_env(env, "REQUEST_METHOD", client->request->method) == -1 ||
+	    add_env(env, "REQUEST_METHOD", client->request->method_str) == -1 ||
 	    add_env(env, "REQUEST_URI", client->request->url) == -1 ||
 	    add_env(env, "QUERY_STRING", req->query ? req->query : "") == -1 ||
 	    add_env(env, "SCRIPT_NAME", client->request->url) == -1 ||
