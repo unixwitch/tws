@@ -1,0 +1,12 @@
+SUBDIRS =		\
+	tws		\
+	@SUEXEC@	\
+	@SUEXEC_WEAK@
+
+all install clean depend:
+	@for dir in $(SUBDIRS); do	\
+		echo "$@ ==> $$dir";	\
+		$(MAKE) -C $$dir $@;	\
+		echo "$@ <== $$dir";	\
+	done
+		

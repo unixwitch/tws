@@ -1,0 +1,30 @@
+CC		= @CC@
+CFLAGS		= @CFLAGS@
+CPPFLAGS	= @CPPFLAGS@ -I..
+LDFLAGS		= @LDFLAGS@
+LIBS		= @LIBS@
+
+CPPFLAGS	+= \
+	-DSUEXEC=\"@SUEXEC@\"		\
+	-DSUEXEC_WEAK=\"@SUEXEC_WEAK@\"	\
+
+OBJS		= 	\
+	main.o		\
+	config.o	\
+	net.o		\
+	log.o		\
+	file.o		\
+	cgi.o		\
+	util.o
+
+all: tws
+tws: $(OBJS)
+	@echo Link tws
+	@$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o tws $(LIBS) @GLIB_LIBS@ @CONFUSE_LIBS@
+
+.c.o:
+	@echo Compile $<
+	@$(CC) $(CPPFLAGS) @GLIB_CFLAGS@ @CONFUSE_CFLAGS@ $(CFLAGS) -c $<
+
+clean:
+	rm -f tws $(OBJS)

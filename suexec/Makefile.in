@@ -1,0 +1,30 @@
+CC		= @CC@
+CFLAGS		= @CFLAGS@
+CPPFLAGS	= @CPPFLAGS@
+LDFLAGS		= @LDFLAGS@
+LIBS		= @LIBS@
+
+SUEXEC_CPPFLAGS =				\
+	-DSUEXEC_USER=\"@SUEXEC_USER@\"		\
+	-DSUEXEC_UID_MIN=@SUEXEC_MIN_UID@	\
+	-DSUEXEC_GID_MIN=@SUEXEC_MIN_GID@	\
+	-DSUEXEC_USERDIR=\"@SUEXEC_USERDIR@\"	\
+	-DSUEXEC_LOGFILE=\"@SUEXEC_LOG@\"	\
+	-DSUEXEC_DOCROOT=\"@SUEXEC_DOCROOT@\"	\
+	-DSUEXEC_PATH=\"@SUEXEC_PATH@\"
+
+OBJS		= 	\
+	suexec.o
+
+all: suexec
+
+.c.o:
+	@echo Compile $<
+	@$(CC) $(CPPFLAGS)  $(SUEXEC_CPPFLAGS) $(CFLAGS) -c $<
+
+suexec: suexec.o
+	@echo Link suexec
+	@$(CC) $(CFLAGS) suexec.o -o suexec
+
+clean:
+	rm -f $(OBJS) suexec

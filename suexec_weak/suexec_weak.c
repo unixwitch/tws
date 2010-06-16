@@ -253,9 +253,6 @@ int main(int argc, char *argv[])
         && ((uid == 0)
             || (! strcmp(SUEXEC_USER, pw->pw_name)))
         ) {
-#ifdef SUEXEC_DOC_ROOT
-        fprintf(stderr, " -D SUEXEC_DOCROOT=\"%s\"\n", SUEXEC_DOCROOT);
-#endif
 #ifdef SUEXEC_GID_MIN
         fprintf(stderr, " -D SUEXEC_GID_MIN=%d\n", SUEXEC_GID_MIN);
 #endif
@@ -273,9 +270,6 @@ int main(int argc, char *argv[])
 #endif
 #ifdef SUEXEC_UID_MIN
         fprintf(stderr, " -D SUEXEC_UID_MIN=%d\n", SUEXEC_UID_MIN);
-#endif
-#ifdef SUEXEC_USERDIR
-        fprintf(stderr, " -D SUEXEC_USERDIR=\"%s\"\n", SUEXEC_USERDIR);
 #endif
         exit(0);
     }
