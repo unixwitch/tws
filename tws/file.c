@@ -48,6 +48,9 @@ file_request_t	*freq = NULL;
 struct stat	 sb;
 char		*path, *end, *s, *t, *ext;
 int		 iscgi = 0;
+time_t		 now;
+struct tm	*tm;
+char		 tbuf[64];
 
 	if ((freq = calloc(1, sizeof (*freq))) == NULL) {
 		log_error("handle_file_request: calloc: %s", strerror(errno));
@@ -205,6 +208,11 @@ next:
 			req->version == HTTP_10 ? "1.0" : "1.1");
 	evbuffer_add_printf(client->wrbuf, "Content-Length: %lu\r\n",
 			(long unsigned) sb.st_size);
+	time(&now);
+	tm = gmtime(&now);
+	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
+	evbuffer_add_printf(client->wrbuf, "Last-Modified: %s\r\n", tbuf);
+
 	if (freq->mimetype)
 		evbuffer_add_printf(client->wrbuf,
 			"Content-Type: %s\r\n",
