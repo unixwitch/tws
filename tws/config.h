@@ -6,7 +6,7 @@
 #ifndef TWS_CONFIG_H
 #define TWS_CONFIG_H
 
-#define DEFAULT_CONFIG "tws.conf"
+#define DEFAULT_CONFIG ETCDIR "/tws.conf"
 
 #include	<glib.h>
 

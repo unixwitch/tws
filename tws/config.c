@@ -304,7 +304,7 @@ char		*s;
 	char	 buf[1024];
 
 		if ((f = fopen(s, "r")) == NULL) {
-			(void) fprintf(stderr, "%s: %s",
+			(void) fprintf(stderr, "%s: %s\n",
 				s, strerror(errno));
 			goto err;
 		}

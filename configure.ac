@@ -4,6 +4,8 @@ AC_CONFIG_SRCDIR([tws/main.c])
 AC_CONFIG_HEADERS([setup.h])
 
 AC_PROG_CC
+AC_PROG_INSTALL
+
 AC_CHECK_LIB([event], [main])
 PKG_CHECK_MODULES([GLIB], [glib-2.0])
 PKG_CHECK_MODULES([CONFUSE], [libconfuse])
@@ -95,5 +97,10 @@ AC_SUBST([SUEXEC_USERDIR], [$suexec_userdir])
 AC_SUBST([SUEXEC_PATH], [$suexec_path])
 AC_SUBST([SUEXEC_LOG], [$suexec_log])
 
-AC_CONFIG_FILES([Makefile tws/Makefile suexec/Makefile suexec_weak/Makefile])
+AC_CONFIG_FILES([
+	Makefile 
+	tws/Makefile 
+	suexec/Makefile 
+	suexec_weak/Makefile
+])
 AC_OUTPUT

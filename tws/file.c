@@ -86,7 +86,7 @@ int		 iscgi = 0;
 	}
 
 	end = path + strlen(path);
-	s = path;
+	s = t = path;
 	for (;;) {
 	struct stat	 sb;
 	char		*u;

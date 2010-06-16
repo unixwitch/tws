@@ -15,6 +15,20 @@
 #include	"log.h"
 
 static int daemonise(int);
+static void usage(void);
+
+static void
+usage() 
+{
+	fprintf(stderr,
+"Usage: tws [-fh] [-c <config>]\n"
+"\n"
+"    -h             Display this text\n"
+"    -f             Run in foreground\n"
+"    -c <config>    Use a different configuration file\n"
+"                   (default: %s)\n"
+, DEFAULT_CONFIG);
+}
 
 int
 main(argc, argv)
@@ -28,16 +42,22 @@ int		 c;
 	(void) argc;
 	(void) argv;
 
-	while ((c = getopt(argc, argv, "c:f")) != -1) {
+	while ((c = getopt(argc, argv, "c:fh")) != -1) {
 		switch (c) {
 		case 'c':
 			config = optarg;
 			break;
 
 		case 'f':
-			fflag = 0;
+			fflag = 1;
+			break;
+
+		case 'h':
+			usage();
+			return 0;
 
 		default:
+			usage();
 			return 1;
 		}
 	}

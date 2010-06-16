@@ -1,3 +1,9 @@
+prefix		= @prefix@
+exec_prefix	= @exec_prefix@
+sysconfdir	= @sysconfdir@
+sbindir		= @sbindir@
+libexecdir	= @libexecdir@
+
 CC		= @CC@
 CFLAGS		= @CFLAGS@
 CPPFLAGS	= @CPPFLAGS@ -I..
@@ -5,8 +11,9 @@ LDFLAGS		= @LDFLAGS@
 LIBS		= @LIBS@
 
 CPPFLAGS	+= \
-	-DSUEXEC=\"@SUEXEC@\"		\
-	-DSUEXEC_WEAK=\"@SUEXEC_WEAK@\"	\
+	-DSUEXEC=\"$(libexecdir)/tws/suexec\"		\
+	-DSUEXEC_WEAK=\"$(libexecdir)/tws/suexec_weak\"	\
+	-DETCDIR=\"$(sysconfdir)/tws\"
 
 OBJS		= 	\
 	main.o		\
@@ -18,6 +25,7 @@ OBJS		= 	\
 	util.o
 
 all: tws
+
 tws: $(OBJS)
 	@echo Link tws
 	@$(CC) $(CFLAGS) $(LDFLAGS) $(OBJS) -o tws $(LIBS) @GLIB_LIBS@ @CONFUSE_LIBS@
@@ -25,6 +33,16 @@ tws: $(OBJS)
 .c.o:
 	@echo Compile $<
 	@$(CC) $(CPPFLAGS) @GLIB_CFLAGS@ @CONFUSE_CFLAGS@ $(CFLAGS) -c $<
+
+install:
+	@INSTALL@ -d $(sysconfdir)/tws
+	@INSTALL@ -m 0644 tws.conf.example $(sysconfdir)/tws
+	@INSTALL@ -m 0644 mime.types.dist $(sysconfdir)/tws
+	if [ ! -f $(sysconfdir)/tws/mime.types ]; then \
+		@INSTALL@ -m 0644 mime.types.dist $(sysconfdir)/tws/mime.types; \
+	fi
+	@INSTALL@ -d $(sbindir)
+	@INSTALL@ -m 0755 tws $(sbindir)
 
 clean:
 	rm -f tws $(OBJS)

@@ -1,3 +1,9 @@
+prefix		= @prefix@
+exec_prefix	= @exec_prefix@
+sysconfdir	= @sysconfdir@
+sbindir		= @sbindir@
+libexecdir	= @libexecdir@
+
 CC		= @CC@
 CFLAGS		= @CFLAGS@
 CPPFLAGS	= @CPPFLAGS@
@@ -23,6 +29,10 @@ all: suexec_weak
 suexec_weak: suexec_weak.o
 	@echo Link suexec_weak
 	@$(CC) $(CFLAGS) suexec_weak.o -o suexec_weak
+
+install:
+	@INSTALL@ -d $(libexecdir)/tws
+	@INSTALL@ -m 0755 suexec_weak $(libexecdir)/tws
 
 clean:
 	rm -f $(OBJS) suexec
