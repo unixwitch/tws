@@ -10,6 +10,6 @@
 #include	"net.h"
 
 	/* Take over a request and handle it as a CGI */
-	void handle_cgi_request(client_t *, file_request_t *);
+	void handle_cgi_request(client_t *);
 
 #endif	/* !TWS_CGI_H */

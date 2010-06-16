@@ -29,6 +29,7 @@ typedef struct {
 	char		*deftype;
 	GPtrArray	*aliases;
 	GPtrArray	*interps;
+	GPtrArray	*indexes;
 	GHashTable	*cgidirs;
 	GHashTable	*cgitypes;
 	int		 suexec_enable;
@@ -51,6 +52,7 @@ typedef struct {
 	int		 use_sendfile;
 	GHashTable	*mimetypes;
 	char		*deftype;
+	GPtrArray	*indexes;
 } tws_config_t;
 
 tws_config_t	*curconf;

@@ -18,15 +18,14 @@
 
 static void cgi_read_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
-static void free_request(file_request_t *req);
-static int setup_cgi_environment(client_t *, file_request_t *, GPtrArray *);
+static void setup_cgi_environment(client_t *, GPtrArray *);
 static int spawn_cgi(
 	const char *dir,
 	const char *const *argp,
 	const char *const *envp,
 	int fds[2]);
 
-static int
+static void
 add_env(
 	GPtrArray	*env,
 	const char	*key,
@@ -34,23 +33,21 @@ add_env(
 )
 {
 char	*s;
-	if ((s = malloc(strlen(key) + strlen(value) + 2)) == NULL)
-		return -1;
+	s = malloc(strlen(key) + strlen(value) + 2);
 	sprintf(s, "%s=%s", key, value);
 	g_ptr_array_add(env, s);
-	return 0;
 }
 
-int
+void
 setup_cgi_environment(
 	client_t *	 client,
-	file_request_t	*req,
 	GPtrArray	*env
 )
 {
 char		*tz = getenv("TZ");
 GHashTableIter	 iter;
 gpointer	 key, value;
+request_t	*req = client->request;
 
 	/* Missing:
 	 * SERVER_ADMIN
@@ -59,25 +56,22 @@ gpointer	 key, value;
 	 * REMOTE_HOST
 	 * REMOTE_ADDR
 	 */
-	if (add_env(env, "PATH", "/bin:/usr/bin:/usr/local/bin") == -1 ||
-	    add_env(env, "GATEWAY_INTERFACE", "CGI/1.1") == -1 ||
-	    add_env(env, "SERVER_PROTOCOL",
-		    client->request->version == HTTP_10 ? "HTTP/1.0" : "HTTP/1.1") == -1 ||
-	    add_env(env, "SCRIPT_FILENAME", req->filename) == -1 ||
-	    add_env(env, "REQUEST_METHOD", client->request->method_str) == -1 ||
-	    add_env(env, "REQUEST_URI", client->request->url) == -1 ||
-	    add_env(env, "QUERY_STRING", req->query ? req->query : "") == -1 ||
-	    add_env(env, "SCRIPT_NAME", client->request->url) == -1 ||
-	    add_env(env, "DOCUMENT_ROOT", req->vhost->docroot) == -1 ||
-	    add_env(env, "SERVER_NAME", req->vhost->name) == -1) {
-		goto err;
-	}
+	add_env(env, "PATH", "/bin:/usr/bin:/usr/local/bin");
+	add_env(env, "GATEWAY_INTERFACE", "CGI/1.1");
+	add_env(env, "SERVER_PROTOCOL",
+		    req->version == HTTP_10 ? "HTTP/1.0" : "HTTP/1.1");
+	add_env(env, "SCRIPT_FILENAME", req->filename);
+	add_env(env, "REQUEST_METHOD", req->method_str);
+	add_env(env, "REQUEST_URI", req->url);
+	add_env(env, "QUERY_STRING", req->query ? req->query : "");
+	add_env(env, "SCRIPT_NAME", req->url);
+	add_env(env, "DOCUMENT_ROOT", req->vhost->docroot);
+	add_env(env, "SERVER_NAME", req->vhost->name);
 
 	if (tz)
-		if (add_env(env, "TZ", tz) == -1)
-			goto err;
+		add_env(env, "TZ", tz);
 
-	g_hash_table_iter_init(&iter, client->request->headers);
+	g_hash_table_iter_init(&iter, req->headers);
 	while (g_hash_table_iter_next(&iter, &key, &value)) {
 	char	*s, hdr[1024] = "HTTP_";
 
@@ -89,14 +83,8 @@ gpointer	 key, value;
 				*s = toupper(*s);
 		}
 
-		if (add_env(env, hdr, value) == -1)
-			goto err;
+		add_env(env, hdr, value);
 	}
-
-	return 0;
-
-err:
-	return -1;
 }
 
 pid_t
@@ -134,10 +122,7 @@ int	ret;
 }
 
 void
-handle_cgi_request(
-	client_t	*client,
-	file_request_t	*req
-)
+handle_cgi_request(client_t *client)
 {
 int		 ret;
 char		 gid[32];
@@ -147,6 +132,7 @@ char		 s[1024];
 guint		 i;
 const char	*dir;
 char		 dirs[1024];
+request_t	*req = client->request;
 
 	req->fds[0] = req->fds[1] = -1;
 
@@ -155,17 +141,9 @@ char		 dirs[1024];
 		goto err;
 	}
 
-	if ((argv = g_ptr_array_new()) == NULL) {
-		log_error("handle_cgi_request: %s",
-			strerror(errno));
-		goto err;
-	}
+	argv = g_ptr_array_new();
 
-	if ((envp = g_ptr_array_new_with_free_func(free)) == NULL) {
-		log_error("handle_cgi_request: %s",
-			strerror(errno));
-		goto err;
-	}
+	envp = g_ptr_array_new_with_free_func(free);
 
 	/* Set up argv */
 	if (!req->vhost->suexec_enable) {
@@ -200,11 +178,7 @@ char		 dirs[1024];
 		dir = dirs;
 	}
 
-	if (setup_cgi_environment(client, req, envp) == -1) {
-		log_error("handle_cgi_request: setup_cgi_environment: %s",
-			strerror(errno));
-		goto err;
-	}
+	setup_cgi_environment(client, envp);
 
 	ret = spawn_cgi(dir, 
 		(const char *const *) argv->pdata, 
@@ -236,7 +210,7 @@ err:
 		close(req->fds[0]);
 	if (req->fds[1] != -1)
 		close(req->fds[1]);
-	client_error(client, 500);
+	client_send_error(client, 500);
 	free_request(req);
 }
 
@@ -250,27 +224,24 @@ cgi_read_callback(
 char	buf[4096];
 ssize_t	i;
 client_t	*client = arg;
-file_request_t	*freq = client->hdldata;
 
-	i = read(freq->fds[0], buf, sizeof (buf));
+	i = read(client->request->fds[0], buf, sizeof (buf));
 
 	if (i == 0) {
-		client_close(client);
-		free_request(freq);
+		client_abort(client);
 		return;
 	}
 
 	if (i == -1 && errno == EAGAIN) {
-		event_add(&freq->ev, NULL);
+		event_add(&client->request->ev, NULL);
 		return;
 	}
 
 	if (i == -1) {
 		log_error("%s: read: %s",
-				freq->filename,
+				client->request->filename,
 				strerror(errno));
-		client_close(client);
-		free_request(freq);
+		client_abort(client);
 		return;
 	}
 
@@ -284,30 +255,12 @@ client_write_callback(
 	int		 error
 )
 {
-file_request_t	*req = client->hdldata;
-
 	if (error) {
 		log_error("client_write_callback: %s",
 			strerror(errno));
-		client_close(client);
-		free_request(req);
+		client_abort(client);
 		return;
 	}
 
-	event_add(&req->ev, NULL);
-}
-
-void
-free_request(
-	file_request_t	*req
-)
-{
-	if (!req)
-		return;
-
-	free(req->filename);
-	free(req->pathinfo);
-	free(req->urlname);
-	close(req->fds[0]);
-	free(req);
+	event_add(&client->request->ev, NULL);
 }

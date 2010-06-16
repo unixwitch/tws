@@ -91,6 +91,7 @@ static cfg_opt_t vhost_opts[] = {
 	CFG_SEC("suexec", suexec_opts, CFGF_NONE),
 	CFG_SEC("interpreter", interpreter_opts, CFGF_TITLE | CFGF_MULTI),
 	CFG_STR_LIST("aliases", "{}", CFGF_NONE),
+	CFG_STR_LIST("index-file", "{}", CFGF_NONE),
 	CFG_STR("default-content-type", 0, CFGF_NONE),
 	CFG_END()
 };
@@ -107,6 +108,7 @@ static cfg_opt_t opts[] = {
 	CFG_SEC("listen", listen_opts, CFGF_MULTI | CFGF_TITLE),
 	CFG_STR("user", 0, CFGF_NONE),
 	CFG_STR("group", 0, CFGF_NONE),
+	CFG_STR_LIST("index-file", "{}", CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -179,6 +181,12 @@ int		 i, j;
 		vh->deftype = xstrdup(s);
 
 	vh->aliases = g_ptr_array_new_with_free_func(free);
+	vh->indexes = g_ptr_array_new_with_free_func(free);
+
+	for (i = 0, j = cfg_size(cfg, "index-file"); i < j; i++)
+		g_ptr_array_add(
+			vh->indexes, 
+			xstrdup(cfg_getnstr(cfg, "index-file", i)));
 
 	if ((scfg = cfg_getsec(cfg, "userdir")) != NULL) {
 	char	*s;
@@ -294,6 +302,13 @@ char		*s;
 		if ((tcfg->deftype = strdup(s)) == NULL)
 			goto err;
 	}
+
+	tcfg->indexes = g_ptr_array_new_with_free_func(free);
+
+	for (i = 0, j = cfg_size(cfg, "index-file"); i < j; i++)
+		g_ptr_array_add(
+			tcfg->indexes, 
+			xstrdup(cfg_getnstr(cfg, "index-file", i)));
 
 	tcfg->mimetypes = g_hash_table_new_full(
 			g_str_hash, g_str_equal,

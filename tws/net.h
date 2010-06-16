@@ -7,9 +7,12 @@
 #define TWS_NET_H
 
 #include	<sys/socket.h>
+#include	<netdb.h>
 
 #include	<event.h>
 #include	<glib.h>
+
+#include	"config.h"
 
 #if defined(__FreeBSD__)
 # define USE_SENDFILE
@@ -54,12 +57,33 @@ typedef struct {
 	GHashTable		*headers;
 	char			*method_str;
 	char			*url;
+	char			*query;
 	http_version_t		 version;
 	http_method_t		 method;
+	vhost_t			*vhost;
+	int			 keepalive;
+
+	/* Common to file and CGI requests */
+	char	*filename;
+	char	*urlname; /* Common part of URL and filename */
+	char	*username;
+	char	*pathinfo;
+	char	*mimetype;
+	int	 userdir;
+
+	/* For file requests */
+	int	 fd;
+	off_t	 bytesdone;
+	off_t	 bytesleft;
+
+	/* For CGI requests */
+	pid_t		 pid;
+	int		 fds[2];
+	struct event	 ev;
 } request_t;
 
 	request_t	*request_new(void);
-	void		 request_free(request_t *);
+	void		 free_request(request_t *);
 
 struct client;
 
@@ -68,6 +92,7 @@ struct client;
 typedef struct client {
 	struct sockaddr_storage	 addr;
 	socklen_t		 addrlen;
+	char			 ip[NI_MAXHOST];
 
 	struct event		 ev;
 	struct evbuffer		*buffer;
@@ -84,8 +109,13 @@ typedef struct client {
 } client_t;
 
 	void client_close(client_t *);
+	void client_abort(client_t *);
 	void client_drain(client_t *, client_drain_callback);
-	void client_error(client_t *, int);
+	void client_send_error(client_t *, int);
+
+	void client_error(client_t *, const char *fmt, ...);
+	void client_warn(client_t *, const char *fmt, ...);
+	void client_notice(client_t *, const char *fmt, ...);
 
 	int net_listen(void);
 	void net_run(void);

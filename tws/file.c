@@ -26,8 +26,7 @@
 #include	"log.h"
 #include	"cgi.h"
 #include	"setup.h"
-
-static void free_request(file_request_t *);
+#include	"util.h"
 
 #ifdef USE_SENDFILE
 static void sendfile_callback(int, short, void *);
@@ -35,8 +34,8 @@ static void sendfile_callback(int, short, void *);
 static void write_callback(client_t *, int);
 static void headers_done(client_t *, int);
 static void error_done(client_t *, int);
-static char *get_filename(request_t *, file_request_t *, vhost_t *);
-static char *get_userdir(request_t *, file_request_t *, vhost_t *);
+static char *get_filename(request_t *);
+static char *get_userdir(request_t *);
 
 void
 handle_file_request(
@@ -45,7 +44,6 @@ handle_file_request(
 {
 request_t	*req = client->request;
 const char	*host;
-file_request_t	*freq = NULL;
 struct stat	 sb;
 char		*path, *end, *s, *t, *ext;
 int		 iscgi = 0;
@@ -54,29 +52,11 @@ struct tm	*tm;
 char		 tbuf[64];
 char		*ims;
 
-	if ((freq = calloc(1, sizeof (*freq))) == NULL) {
-		log_error("handle_file_request: calloc: %s", strerror(errno));
-		client_error(client, 500);
-		return;
-	}
-	client->hdldata = freq;
-
-	if ((host = g_hash_table_lookup(req->headers, "Host")) == NULL)
-		host = "_default_";
-
-	if ((freq->vhost = config_find_vhost(host)) == NULL) 
-		host = "_default_";
-
-	if ((freq->vhost = config_find_vhost(host)) == NULL) {
-		client_error(client, 404);
-		return;
-	}
-
-	if ((freq->query = index(req->url, '?')) != NULL)
-		*freq->query++ = '\0';
-
-	if ((freq->filename = get_filename(req, freq, freq->vhost)) == NULL) {
-		client_error(client, 500);
+	/*
+	 * Transform the filename into either a docroot or userdir request.
+	 */
+	if ((req->filename = get_filename(req)) == NULL) {
+		client_send_error(client, 500);
 		return;
 	}
 
@@ -84,12 +64,7 @@ char		*ims;
 	 * Traverse the filename, and check each component of the path.  If
 	 * we end up at a file, the remainder of the URL is path info.
 	 */
-	if ((path = strdup(freq->filename)) == NULL) {
-		log_error("handle_file_request: strdup: %s", strerror(errno));
-		client_error(client, 500);
-		return;
-	}
-
+	path = xstrdup(req->filename);
 	end = path + strlen(path);
 	s = t = path;
 	for (;;) {
@@ -103,52 +78,50 @@ char		*ims;
 			/* Empty component */
 			goto next;
 
-		fprintf(stderr, "component: [%s]\n", s);
 		if (stat(s, &sb) == -1) {
-			log_error("handle_file_request: %s: %s",
+			client_error(client, "%s: %s",
 				s, strerror(errno));
 
 			switch (errno) {
 			case EACCES:
-				client_error(client, 403);
+				client_send_error(client, 403);
 				return;
 			default:
-				client_error(client, 404);
+				client_send_error(client, 404);
 				return;
 			}
 		}
 
 		if ((u = rindex(s, '/')) && !strcmp(u, "/..")) {
-			client_error(client, 404);
+			client_send_error(client, 404);
 			return;
 		}
 
+		/*
+		 * Found a file.  If there's any more URL left, turn it into
+		 * path info for CGI requests.
+		 */
 		if (!S_ISDIR(sb.st_mode)) {
-			if (t != end) {
-				if ((freq->pathinfo = strdup(freq->filename + strlen(s))) == NULL) {
-					log_error("handle_file_request: strdup: %s",
-							strerror(errno));
-					client_error(client, 500);
-					return;
-				}
-				fprintf(stderr, "path info: [%s]\n", freq->pathinfo);
-			}
+			if (t != end)
+				req->pathinfo = xstrdup(req->filename + strlen(s));
 
-			free(freq->filename);
-			freq->filename = s;
+			free(req->filename);
+			req->filename = s;
 
 			/* Identify the MIME type */
 			if ((ext = rindex(s, '.')) != NULL &&
 			    ext > rindex(s, '/')) {
-				fprintf(stderr, "ext [%s]\n", ext);
-				freq->mimetype = g_hash_table_lookup(
+				req->mimetype = g_hash_table_lookup(
 					curconf->mimetypes, ext + 1);
 			}
 
 			break;
 		}
 
-		if (g_hash_table_lookup_extended(freq->vhost->cgidirs, s, NULL, NULL))
+		/*
+		 * If we're now inside a CGI directory, mark this as a CGI request.
+		 */
+		if (g_hash_table_lookup_extended(req->vhost->cgidirs, s, NULL, NULL))
 			iscgi = 1;
 
 next:
@@ -161,28 +134,31 @@ next:
 			t++;
 	}
 
-	if (g_hash_table_lookup_extended(freq->vhost->cgitypes, freq->mimetype, NULL, NULL))
+	/*
+	 * Check if the MIME type forces this to be a CGI request.  If so,
+	 * pass it off to the CGI handler.
+	 */
+	if (g_hash_table_lookup_extended(req->vhost->cgitypes, req->mimetype, NULL, NULL))
 		iscgi = 1;
 
 	if (iscgi) {
-		fprintf(stderr, "execute CGI: %s\n", freq->filename);
-		handle_cgi_request(client, freq);
+		/* Our work here is done */
+		handle_cgi_request(client);
 		return;
 	}
 
 	/* We only support GET and HEAD for files */
 	if (req->method != M_GET && req->method != M_HEAD) {
-		client_error(client, 403);
-		free_request(freq);
+		client_send_error(client, 403);
 		return;
 	}
 
-	if ((freq->fd = open(freq->filename, O_RDONLY)) == -1) {
-		log_error("%s: %s", freq->filename, strerror(errno));
+	if ((req->fd = open(req->filename, O_RDONLY)) == -1) {
+		client_error(client, "%s", strerror(errno));
 
 		switch (errno) {
 		case EACCES:
-			client_error(client, 403);
+			client_send_error(client, 403);
 			break;
 
 		/*
@@ -192,22 +168,22 @@ next:
 		 * file.
 		 */
 		default:
-			client_error(client, 404);
+			client_send_error(client, 404);
 			break;
 		}
 
 		return;
 	}
 
-	if (fstat(freq->fd, &sb) == -1) {
-		log_error("%s: %s", freq->filename, strerror(errno));
-		client_close(client);
+	if (fstat(req->fd, &sb) == -1) {
+		client_error(client, "%s", strerror(errno));
+		client_send_error(client, 404);
 		return;
 	}
 
 	if (!S_ISREG(sb.st_mode)) {
-		log_error("%s: is not a regular file", freq->filename);
-		client_close(client);
+		client_error(client, "not a regular file");
+		client_send_error(client, 403);
 		return;
 	}
 
@@ -216,18 +192,15 @@ next:
 	struct tm	stm;
 		if (strptime(ims, "%b, %d %a %Y %H:%M:%S GMT", &stm) != NULL) {
 			if (timegm(&stm) >= sb.st_mtime) {
-				close(freq->fd);
-				client_error(client, 304);
-				free_request(freq);
+				client_send_error(client, 304);
 				return;
 			}
 		}
 	}
 
-	freq->bytesleft = sb.st_size;
+	req->bytesleft = sb.st_size;
 
-	evbuffer_add_printf(client->wrbuf, "HTTP/%s 200 OK\r\n",
-			req->version == HTTP_10 ? "1.0" : "1.1");
+	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 200 OK\r\n");
 	evbuffer_add_printf(client->wrbuf, "Server: Toolserver-Web-Server/%s\r\n",
 			PACKAGE_VERSION);
 	evbuffer_add_printf(client->wrbuf, "Content-Length: %lu\r\n",
@@ -245,14 +218,14 @@ next:
 	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
 	evbuffer_add_printf(client->wrbuf, "Last-Modified: %s\r\n", tbuf);
 
-	if (freq->mimetype)
+	if (req->mimetype)
 		evbuffer_add_printf(client->wrbuf,
 			"Content-Type: %s\r\n",
-			freq->mimetype);
-	else if (freq->vhost->deftype)
+			req->mimetype);
+	else if (req->vhost->deftype)
 		evbuffer_add_printf(client->wrbuf,
 			"Content-Type: %s\r\n",
-			freq->vhost->deftype);
+			req->vhost->deftype);
 	else if (curconf->deftype)
 		evbuffer_add_printf(client->wrbuf,
 			"Content-Type: %s\r\n",
@@ -269,12 +242,14 @@ headers_done(
 )
 {
 	if (error) {
-		log_error("write: %s", strerror(error));
-		free_request(client->hdldata);
+		client_error(client, "write: %s", strerror(error));
 		client_close(client);
 		return;
 	}
 
+	/*
+	 * For a HEAD request, we're done after writing the headers.
+	 */
 	if (client->request->method == M_HEAD) {
 		client_close(client);
 		return;
@@ -300,27 +275,26 @@ sendfile_callback(
 client_t	*client = arg;
 int		 ret;
 off_t		 done;
-file_request_t	*freq = client->hdldata;
 
-	ret = sendfile(freq->fd, client->fd, freq->bytesdone, 
-			freq->bytesleft, NULL, &done, 0);
+	ret = sendfile(client->request->fd, client->fd, client->request->bytesdone, 
+			client->request->bytesleft, NULL, &done, 0);
 
+	/* Write done */
 	if (ret == 0) {
-		free_request(freq);
 		client_close(client);
 		return;
 	}
 
 	if (ret == -1 && errno == EAGAIN) {
-		freq->bytesdone += done;
-		freq->bytesleft -= done;
+		client->request->bytesdone += done;
+		client->request->bytesleft -= done;
 		event_add(&client->ev, NULL);
 		return;
 	}
 
-	log_error("%s: sendfile: %s", freq->filename, strerror(errno));
-	free_request(freq);
-	client_close(client);
+	/* Write error, abort the client */
+	client_error(client, "sendfile: %s", strerror(errno));
+	client_abort(client);
 	return;
 }
 #endif
@@ -333,20 +307,17 @@ write_callback(
 {
 int		 ret;
 off_t		 done;
-file_request_t	*freq = client->hdldata;
 char		 buf[4096];
 ssize_t		 n;
 	
-	n = read(freq->fd, buf, sizeof(buf));
+	n = read(client->request->fd, buf, sizeof (buf));
 	if (n == -1) {
-		log_error("%s: read: %s", freq->filename, strerror(errno));
-		free_request(freq);
-		client_close(client);
+		client_error(client, "read: %s", strerror(errno));
+		client_abort(client);
 		return;
 	}
 
 	if (n == 0) {
-		free_request(freq);
 		client_close(client);
 		return;
 	}
@@ -355,101 +326,55 @@ ssize_t		 n;
 	client_drain(client, write_callback);
 }
 
-void
-free_request(
-	file_request_t	*req
-)
-{
-	if (!req)
-		return;
-
-	free(req->filename);
-	free(req->username);
-	free(req->pathinfo);
-	free(req->urlname);
-	close(req->fd);
-	free(req);
-}
-
 char *
-get_filename(
-	request_t	*req,
-	file_request_t	*freq,
-	vhost_t		*vhost
-)
+get_filename(request_t *req)
 {
 char	*fname;
 
-	if (vhost->userdir) {
-		if ((fname = get_userdir(req, freq, vhost)) != NULL)
+	if (req->vhost->userdir) {
+		if ((fname = get_userdir(req)) != NULL)
 			return fname;
 	}
 
-	if ((fname = malloc(strlen(vhost->docroot) + 1 + strlen(req->url) + 1)) == NULL) {
-		log_error("get_filename: malloc: %s", strerror(errno));
-		return NULL;
-	}
+	fname = xmalloc(strlen(req->vhost->docroot) + 1 + strlen(req->url) + 1);
+	sprintf(fname, "%s/%s", req->vhost->docroot, req->url + 1);
 
-	sprintf(fname, "%s/%s", vhost->docroot, req->url + 1);
-	if ((freq->urlname = strdup(req->url + 1)) == NULL) {
-		log_error("get_filename: strdup: %s", strerror(errno));
-		return NULL;
-	}
+	req->urlname = strdup(req->url + 1);
 
 	return fname;
 }
 
 char *
-get_userdir(
-	request_t	*req,
-	file_request_t	*freq,
-	vhost_t		*vhost
-)
+get_userdir(request_t *req)
 {
 struct passwd	*pwd;
 char		*uname, *s, *fname;
 
-	if (strncmp(req->url, vhost->userdir_prefix, strlen(vhost->userdir_prefix)) != 0 ||
-	    strlen(req->url) <= strlen(vhost->userdir_prefix))
+	if (strncmp(req->url, req->vhost->userdir_prefix, strlen(req->vhost->userdir_prefix)) != 0 ||
+	    strlen(req->url) <= strlen(req->vhost->userdir_prefix))
 		return NULL;
 
 	/* The URL form is <prefix><username>[/] */
-	if ((uname = strdup(req->url + strlen(vhost->userdir_prefix))) == NULL) {
-		log_error("get_userdir: strdup: %s", strerror(errno));
-		return NULL;
-	}
+	uname = xstrdup(req->url + strlen(req->vhost->userdir_prefix));
 
 	if ((s = strchr(uname, '/')) != NULL)
 		*s++ = '\0';
 
-	if ((freq->username = strdup(uname)) == NULL) {
-		log_error("get_userdir: strdup: %s", strerror(errno));
-		return NULL;
-	}
-	freq->userdir = 1;
+	req->username = strdup(uname);
+	req->userdir = 1;
 
 	if ((pwd = getpwnam(uname)) == NULL) {
 		free(uname);
 		return NULL;
 	}
 
-	if ((fname = malloc(
-			strlen(pwd->pw_dir) + 1 +
-			strlen(s) + 1)) == NULL) {
-		log_error("get_userdir: malloc: %s", strerror(errno));
-		free(uname);
-		return NULL;
-	}
+	fname = xmalloc(strlen(pwd->pw_dir) + 1 + strlen(s) + 1);
 
 	sprintf(fname, "%s/%s/%s",
 			pwd->pw_dir,
-			vhost->userdir,
+			req->vhost->userdir,
 			s);
-	if ((freq->urlname = strdup(s)) == NULL) {
-		log_error("get_userdir: strdup: %s", strerror(errno));
-		free(uname);
-		return NULL;
-	}
+	req->urlname = xstrdup(s);
 
 	free(uname);
 	return fname;

@@ -13,6 +13,7 @@
 #include	"config.h"
 #include	"net.h"
 #include	"log.h"
+#include	"setup.h"
 
 static int daemonise(int);
 static void usage(void);
@@ -72,7 +73,7 @@ int		 c;
 		return 1;
 	}
 
-	log_notice("TWS starting up");
+	log_notice("TWS/%s starting up", PACKAGE_VERSION);
 
 	/* Set up listeners before setuid, since we need to be root to
 	 * bind to port 80.
@@ -87,7 +88,7 @@ int		 c;
 
 	net_run();
 
-	log_notice("TWS shutting down");
+	log_notice("TWS/%s shutting down", PACKAGE_VERSION);
 	return 0;
 }
 

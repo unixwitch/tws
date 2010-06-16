@@ -20,6 +20,8 @@
 #include	"config.h"
 #include	"log.h"
 #include	"file.h"
+#include	"setup.h"
+#include	"util.h"
 
 static void accept_client(int, short, void *);
 static void client_read(int, short, void *);
@@ -186,53 +188,28 @@ client_new(
 )
 {
 client_t	*client;
-	if ((client = calloc(1, sizeof(*client))) == NULL)
-		goto err;
 
+	client = xcalloc(1, sizeof(*client));
 	client->fd = fd;
 
 	if ((client->buffer = evbuffer_new()) == NULL)
-		goto err;
+		outofmemory();
 
 	if ((client->wrbuf = evbuffer_new()) == NULL)
-		goto err;
+		outofmemory();
 
 	return client;
-
-err:
-	client_close(client);
-	return NULL;
 }
 
 request_t *
 request_new()
 {
 request_t	*request;
-	if ((request = calloc(1, sizeof (*request))) == NULL)
-		goto err;
 
-	if ((request->headers = g_hash_table_new_full(
-	    g_str_hash, g_str_equal, free, NULL)) == NULL)
-		goto err;
+	request = xcalloc(1, sizeof (*request));
+	request->headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
 
 	return request;
-
-err:
-	request_free(request);
-	return NULL;
-}
-
-void
-request_free(
-	request_t	*request
-)
-{
-	if (!request)
-		return;
-
-	g_hash_table_destroy(request->headers);
-	free(request->method_str);
-	free(request);
 }
 
 void
@@ -240,13 +217,14 @@ accept_client(
 	int	 fd,
 	short	 ev,
 	void	*arg
-	)
+)
 {
-int		 cfd = -1;
+int		 cfd = -1, ret;
 listener_t	*l = arg;
 client_t	 *client = NULL;
+
 struct sockaddr_storage	addr;
-socklen_t	 addrlen = sizeof(addr);
+socklen_t		addrlen = sizeof(addr);
 
 	event_add(&l->ev, NULL);
 
@@ -265,9 +243,17 @@ socklen_t	 addrlen = sizeof(addr);
 		goto err;
 	}
 
-	bcopy(&addr, &client->addr, sizeof(fd));
+	bcopy(&addr, &client->addr, sizeof(addr));
 	client->addrlen = addrlen;
 	client->state = READ_REQUEST;
+
+	ret = getnameinfo((struct sockaddr *) &client->addr, client->addrlen, 
+			client->ip, sizeof (client->ip), NULL, 0, 
+			NI_NUMERICHOST);
+	if (ret != 0) {
+		log_error("accept_client: getnameinfo: %s\n", gai_strerror(ret));
+		goto err;
+	}
 
 	event_set(&client->ev, client->fd, EV_READ, client_read, client);
 	event_add(&client->ev, NULL);
@@ -278,7 +264,7 @@ err:
 	if (cfd != -1)
 		close(cfd);
 	if (client)
-		client_close(client);
+		client_abort(client);
 }
 
 /*
@@ -289,10 +275,11 @@ client_read(
 	int	 fd,
 	short	 what,
 	void	*arg
-	)
+)
 {
 client_t	*client = arg;
-char		*line;
+request_t	*req = client->request;
+char		*line, *host, *conn;
 int		 ret;
 
 	ret = evbuffer_read(client->buffer, client->fd, READ_BUFSZ);
@@ -303,28 +290,69 @@ int		 ret;
 	}
 
 	if (ret == -1) {
-		log_error("client read error: %s", strerror(errno));
-		client_close(client);
+		client_error(client, "read error: %s", strerror(errno));
+		client_abort(client);
 		return;
 	}
 
 	if (ret == 0) {
-		log_error("client closed connection");
-		client_close(client);
+		client_abort(client);
 		return;
 	}
 
-	if (client->state == READ_REQUEST) {
-		if (client_read_request(client) == -1) {
-			event_add(&client->ev, NULL);
-			return;
-		}
+	/*
+	 * If there's a \r\n\r\n in the buffer, we've read the entire
+	 * request.  If not, keep going.
+	 */
+	if (evbuffer_find(client->buffer, (const u_char *) "\r\n\r\n", 4) == NULL) {
+		event_add(&client->ev, NULL);
+		return;
+	}
+
+	if (client_read_request(client) == -1) {
+		client_abort(client);
+		return;
 	}
 
 	while (client->state == READ_HEADERS) {
 		if (client_read_header(client) == -1) {
-			event_add(&client->ev, NULL);
+			client_abort(client);
 			return;
+		}
+	}
+
+	/* Determine the vhost based on the Host header */
+	if ((host = g_hash_table_lookup(req->headers, "Host")) == NULL)
+		host = "_default_";
+
+	if ((req->vhost = config_find_vhost(host)) == NULL) {
+		host = "_default_";
+
+		if ((req->vhost = config_find_vhost(host)) == NULL) {
+			client_send_error(client, 404);
+			return;
+		}
+	}
+
+	/* Split off the query string */
+	if ((req->query = index(req->url, '?')) != NULL)
+		*req->query++ = '\0';
+
+	/*
+	 * See if we should do keep-alive.  HTTP/1.1 only.
+	 */
+	if (req->version == HTTP_11) {
+		client->request->keepalive = 1;
+
+		if ((conn = g_hash_table_lookup(req->headers, "Connection")) != NULL) {
+		gchar	**opts, *opt;
+			opts = g_strsplit(conn, ", ", 0);
+			for (opt = *opts; *opt; ++opt)
+				if (!strcasecmp(opt, "close")) {
+					client->request->keepalive = 0;
+					break;
+				}
+			g_strfreev(opts);
 		}
 	}
 
@@ -350,7 +378,7 @@ char	*header, *value;
 
 	if ((value = strstr(header, ": ")) == NULL) {
 		/* Invalid header */
-		client_close(client);
+		client_abort(client);
 		return -1;
 	}
 
@@ -376,7 +404,7 @@ request_t	*req = client->request;
 	req->method_str = strdup(line);
 	if ((req->url = strchr(req->method_str, ' ')) == NULL) {
 		/* Invalid request */
-		client_close(client);
+		client_abort(client);
 		return -1;
 	}
 
@@ -384,7 +412,7 @@ request_t	*req = client->request;
 	*req->url++ = '\0';
 	if ((s = strchr(req->url, ' ')) == NULL) {
 		/* Invalid request */
-		client_close(client);
+		client_abort(client);
 		return -1;
 	}
 
@@ -396,7 +424,7 @@ request_t	*req = client->request;
 		req->version = HTTP_11;
 	else {
 		/* Unknown HTTP version */
-		client_close(client);
+		client_abort(client);
 		return -1;
 	}
 
@@ -423,27 +451,38 @@ client_write(
 	int	 fd,
 	short	 what,
 	void	*arg
-	)
+)
 {
 client_t	*cli = arg;
 }
 
 void
-client_close(
-	client_t	*client
-)
+client_abort(client_t *client)
 {
-	if (!client)
-		return;
+	assert(client);
 
-	/*event_del(&client->ev);*/
 	close(client->fd);
 
-	request_free(client->request);
+	free_request(client->request);
 	evbuffer_free(client->buffer);
 	evbuffer_free(client->wrbuf);
 
 	free(client);
+}
+
+void
+client_close(client_t *client)
+{
+	if (!client->request->keepalive) {
+		client_abort(client);
+		return;
+	}
+
+	free_request(client->request);
+	client->request = request_new();
+
+	event_set(&client->ev, client->fd, EV_READ, client_read, client);
+	event_add(&client->ev, NULL);
 }
 
 static void
@@ -484,13 +523,16 @@ client_drain(
 }
 
 void
-client_error(
+client_send_error(
 	client_t	*client,
 	int		 code
 )
 {
 const char	*status;
 const char	*body = NULL;
+time_t		 now;
+struct tm	*tm;
+char		 tbuf[64];
 
 	switch (code) {
 	case 304:
@@ -520,12 +562,19 @@ const char	*body = NULL;
 		break;
 	}
 
+	time(&now);
+	tm = gmtime(&now);
+	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
+
 	evbuffer_add_printf(client->wrbuf, 
 			"HTTP/%s %d %s\r\n"
+			"Server: Toolserver-Web-Server/%s\r\n"
+			"Date: %s\r\n"
 			"Content-Type: text/plain\r\n"
 			"Content-Length: %d\r\n\r\n",
 			client->request->version == HTTP_10 ? "1.0" : "1.1",
-			code, status, body ? strlen(body) : 0);
+			code, status, PACKAGE_VERSION, tbuf,
+			body ? (int) strlen(body) : 0);
 
 	if (body)
 		evbuffer_add(client->wrbuf, body, strlen(body));
@@ -540,4 +589,114 @@ error_done(
 )
 {
 	client_close(client);
+}
+
+void
+free_request(request_t *req)
+{
+	if (!req)
+		return;
+
+	if (req->headers)
+		g_hash_table_destroy(req->headers);
+
+	free(req->method_str);
+	free(req->filename);
+	free(req->username);
+	free(req->pathinfo);
+	free(req->urlname);
+
+	if (req->fd)
+		close(req->fd);
+
+	if (req->fds[0])
+		close(req->fds[0]);
+	if (req->fds[1])
+		close(req->fds[1]);
+	free(req);
+}
+
+static void
+client_logfmt(
+	client_t	*client,
+	char		*buf,
+	size_t		 bufsz
+)
+{
+	buf[0] = '\0';
+
+	if (client->ip[0]) {
+		strlcat(buf, "[Client: ", bufsz);
+		strlcat(buf, client->ip, bufsz);
+		strlcat(buf, "]", bufsz);
+	}
+
+	if (client->request->url) {
+		strlcat(buf, "[URL: ", bufsz);
+		strlcat(buf, client->request->url, bufsz);
+		strlcat(buf, "]", bufsz);
+	}
+
+	if (client->request->filename) {
+		strlcat(buf, "[File: ", bufsz);
+		strlcat(buf, client->request->filename, bufsz);
+		strlcat(buf, "]", bufsz);
+	}
+}
+
+void
+client_error(
+	client_t	*client,
+	const char	*fmt,
+	...
+)
+{
+char	cbuf[1024];
+char	err[1024];
+char	msg[2048];
+va_list	ap;
+	client_logfmt(client, cbuf, sizeof (cbuf));
+	va_start(ap, fmt);
+	vsnprintf(err, sizeof (msg), fmt, ap);
+	va_end(ap);
+	snprintf(msg, sizeof (msg), "%s %s", cbuf, err);
+	log_error("%s", msg);
+}
+
+void
+client_warn(
+	client_t	*client,
+	const char	*fmt,
+	...
+)
+{
+char	cbuf[1024];
+char	err[1024];
+char	msg[2048];
+va_list	ap;
+	client_logfmt(client, cbuf, sizeof (cbuf));
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof (err), fmt, ap);
+	va_end(ap);
+	snprintf(msg, sizeof (msg), "%s %s", cbuf, err);
+	log_warn("%s", msg);
+}
+
+void
+client_notice(
+	client_t	*client,
+	const char	*fmt,
+	...
+)
+{
+char	cbuf[1024];
+char	err[1024];
+char	msg[2048];
+va_list	ap;
+	client_logfmt(client, cbuf, sizeof (cbuf));
+	va_start(ap, fmt);
+	vsnprintf(msg, sizeof (err), fmt, ap);
+	va_end(ap);
+	snprintf(msg, sizeof (msg), "%s %s", cbuf, err);
+	log_notice("%s", msg);
 }
