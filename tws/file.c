@@ -25,6 +25,7 @@
 #include	"net.h"
 #include	"log.h"
 #include	"cgi.h"
+#include	"setup.h"
 
 static void free_request(file_request_t *);
 
@@ -206,6 +207,8 @@ next:
 
 	evbuffer_add_printf(client->wrbuf, "HTTP/%s 200 OK\r\n",
 			req->version == HTTP_10 ? "1.0" : "1.1");
+	evbuffer_add_printf(client->wrbuf, "Server: Toolserver-Web-Server/%s\r\n",
+			PACKAGE_VERSION);
 	evbuffer_add_printf(client->wrbuf, "Content-Length: %lu\r\n",
 			(long unsigned) sb.st_size);
 
