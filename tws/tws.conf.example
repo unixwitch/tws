@@ -1,0 +1,120 @@
+/*
+ * Example TWS configuration file.
+ */
+
+# User/group to run as
+user = "www"
+group = "www"
+
+# Use sendfile() to improve static file performance.  Only available on
+# FreeBSD.
+use-sendfile = "yes"
+
+# IP address to listen on; can specify several.
+listen "0.0.0.0:80" {
+	# Number of waiting connections to allow
+	backlog = 64
+
+	# Force a particular protocol
+	protocol = ipv4
+}
+
+# Client read timeout
+timeout = 60
+
+# The default content type.  If you don't set this, no Content-Type header will
+# be sent for unknown types.  This is normally what you want, but if you have a
+# lot of text files with funny extensions, you could set this to text/plain.
+default-content-type = "text/plain"
+
+# Where to load the list of MIME types from
+mime-type-file = "/usr/local/etc/tws/mime.types"
+
+# Any number of virtual hosts can be defined.  If none matches the client
+# request, _default_ will be served.  If _default_ is not defined, the client
+# will receive an error message.
+
+virtualhost "_default_" {
+	# Other names that refer to this host
+	aliases = {
+		"ilythia.tcx.org.uk"
+	}
+
+	# Root directory
+	docroot = "/var/www"
+
+	# Enable per-user document directories.  This allows 
+	# /~username/index.html to refer to, for example,
+	# /home/username/public_html/index.html.
+	userdir {
+		prefix = "/~"	# or prefix = "/users/", etc.
+		dir = public_html
+	}
+
+	# CGI programs.  There are two ways to run CGIs: either define a
+	# particular directory as being a CGI directory, in which case all files
+	# in that directory are considered CGIs, or define one or more MIME
+	# types to be executed as CGI programs. 
+	
+	cgi {
+		# Always treat these MIME types as CGI
+		mime-types = {
+			"application/x-cgi"
+		}
+
+		# Or define some CGI directories.  These do not need to be
+		# inside the document root, but must be reachable somehow.
+		cgi-bin = {
+			"/var/www/cgi-bin"
+		}
+	}
+
+	# Force a CGI program to be executed with a particular interpreter.  
+	# This is mostly useful for PHP.
+	interpreter "/usr/local/bin/php-cgi" {
+		mime-types = {
+			"application/x-php"
+		}
+
+		# Use FastCGI for the interpreter.  Note: for PHP, make sure
+		# PHP was built with FastCGI enabled.
+		protocol = fastcgi
+	}
+
+	suexec {
+		# Normally, CGI scripts are executed as the web server
+		# user.  suexec allows them to run as the owner of the
+		# file instead.
+		#
+		# Note that since suexec requires the use of a setuid-root
+		# wrapper script to start CGIs, a vulnerability in that
+		# script, while unlikely, could lead to root compromise.
+		#
+		# On the other hand, if you have local users (using userdir),
+		# not using suexec means they can interfere with each
+		# others' processes, read database passwords, etc.
+		enable = yes
+
+		# Note that when suexec is combined with the "interpreter"
+		# feature, a separate version of suexec will be used, called
+		# suexec_weak.  This imposes fewer restrictions on the
+		# executable than suexec does, and is required for executing
+		# arbitrary script interpreters.
+		#
+		# However, unlike the normal suexec which will only run scripts
+		# in the document root or a userdir, suexec_weak allows anyone
+		# with access to the web server uid to run any program as any 
+		# (non-root) user on the system.  This is necessary to let it
+		# start interpreterss in e.g. /usr/local/bin.
+		#
+		# Both suexec and suexec_weak need to be setuid to work, but for
+		# security reasons, are not installed that way.  Enable them
+		# like this:
+		#
+		#   # chmod u+s /usr/local/libexec/tws/suexec
+		#   # chmod u+s /usr/local/libexec/tws/suexec_weak
+	}
+
+	# Some global options can be defined for virtual hosts as well
+	default-content-type = "text/plain"
+}
