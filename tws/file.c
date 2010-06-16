@@ -52,6 +52,7 @@ int		 iscgi = 0;
 time_t		 now;
 struct tm	*tm;
 char		 tbuf[64];
+char		*ims;
 
 	if ((freq = calloc(1, sizeof (*freq))) == NULL) {
 		log_error("handle_file_request: calloc: %s", strerror(errno));
@@ -208,6 +209,19 @@ next:
 		log_error("%s: is not a regular file", freq->filename);
 		client_close(client);
 		return;
+	}
+
+	/* Check for If-Modified-Since */
+	if ((ims = g_hash_table_lookup(req->headers, "If-Modified-Since")) != NULL) {
+	struct tm	stm;
+		if (strptime(ims, "%b, %d %a %Y %H:%M:%S GMT", &stm) != NULL) {
+			if (timegm(&stm) >= sb.st_mtime) {
+				close(freq->fd);
+				client_error(client, 304);
+				free_request(freq);
+				return;
+			}
+		}
 	}
 
 	freq->bytesleft = sb.st_size;

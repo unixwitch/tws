@@ -490,13 +490,11 @@ client_error(
 )
 {
 const char	*status;
-const char	*body;
+const char	*body = NULL;
 
 	switch (code) {
-	case 404:
-		status = "Not found";
-		body = "The requested resource was not found "
-			"on this server.\n";
+	case 304:
+		status = "Not modified";
 		break;
 
 	case 403:
@@ -504,10 +502,17 @@ const char	*body;
 		body = "Access to the requested resource was denied.\n";
 		break;
 
+	case 404:
+		status = "Not found";
+		body = "The requested resource was not found "
+			"on this server.\n";
+		break;
+
 	case 500:
 		status = "Internal server error";
 		body = "The server encountered an internal error while "
 			"trying to process your request.\n";
+		break;
 
 	default:
 		status = "Unknown";
@@ -517,10 +522,14 @@ const char	*body;
 
 	evbuffer_add_printf(client->wrbuf, 
 			"HTTP/%s %d %s\r\n"
-			"Content-Type: text/plain\r\n\r\n",
+			"Content-Type: text/plain\r\n"
+			"Content-Length: %d\r\n\r\n",
 			client->request->version == HTTP_10 ? "1.0" : "1.1",
-			code, status);
-	evbuffer_add(client->wrbuf, body, strlen(body));
+			code, status, body ? strlen(body) : 0);
+
+	if (body)
+		evbuffer_add(client->wrbuf, body, strlen(body));
+
 	client_drain(client, error_done);
 }
 
