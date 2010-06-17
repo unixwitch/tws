@@ -849,12 +849,11 @@ const char	*body = NULL;
 	}
 
 	evbuffer_add_printf(client->wrbuf, 
-			"HTTP/%s %d %s\r\n"
+			"HTTP/1.1 %d %s\r\n"
 			"Server: %s\r\n"
 			"Date: %s\r\n"
 			"Content-Type: text/plain\r\n"
 			"Content-Length: %d\r\n\r\n",
-			client->request->version == HTTP_10 ? "1.0" : "1.1",
 			code, status, server_version, current_time,
 			body ? (int) strlen(body) : 0);
 
@@ -893,13 +892,12 @@ const char	*status;
 	}
 
 	evbuffer_add_printf(client->wrbuf, 
-			"HTTP/%s %d %s\r\n"
+			"HTTP/1.1 %d %s\r\n"
 			"Server: %s\r\n"
 			"Date: %s\r\n"
 			"Location: %s\r\n"
 			"Content-Type: text/plain\r\n"
 			"Content-Length: 0\r\n\r\n",
-			client->request->version == HTTP_10 ? "1.0" : "1.1",
 			code, status, server_version, current_time, where);
 
 	client_drain(client, error_done);
