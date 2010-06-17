@@ -16,6 +16,7 @@
 #include	<assert.h>
 #include	<stdio.h>
 #include	<fnmatch.h>
+#include	<signal.h>
 
 #include	<glib.h>
 #include	<event.h>
@@ -198,6 +199,7 @@ struct timeval timeout = { 1, 0 };
 
 	event_set(&ev_sigint, SIGINT, EV_SIGNAL, exit_signal, NULL);
 	event_set(&ev_sigterm, SIGINT, EV_SIGNAL, exit_signal, NULL);
+	signal(SIGPIPE, SIG_IGN);
 	event_add(&ev_sigint, NULL);
 	event_add(&ev_sigterm, NULL);
 
