@@ -16,6 +16,7 @@
 #include	"file.h"
 #include	"log.h"
 #include	"setup.h"
+#include	"util.h"
 
 static void cgi_read_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
@@ -66,7 +67,7 @@ request_t	*req = client->request;
 	add_env(env, "SCRIPT_NAME", req->url);
 	add_env(env, "DOCUMENT_ROOT", req->vhost->docroot);
 	add_env(env, "SERVER_NAME", req->vhost->name);
-	add_env(env, "REMOTE_HOST", client->ip);
+	add_env(env, "REMOTE_HOST", client->hostname);
 	add_env(env, "REMOTE_ADDR", client->ip);
 
 	if (req->pathinfo)

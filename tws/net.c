@@ -18,6 +18,7 @@
 
 #include	<glib.h>
 #include	<event.h>
+#include	<evdns.h>
 
 #include	"net.h"
 #include	"config.h"
@@ -27,6 +28,11 @@
 #include	"util.h"
 
 static void accept_client(int, short, void *);
+static void client_start(client_t *);
+static void client_lookup(client_t *);
+static void client_dns(client_t *);
+static void client_dns_reverse_done(int, char, int, int, void *, void *);
+static void client_dns_forward_done(int, char, int, int, void *, void *);
 static void client_read(int, short, void *);
 static void client_write(int, short, void *);
 static int client_read_request(client_t *);
@@ -162,6 +168,11 @@ static struct event ev_sigterm;
 		goto err;
 	}
 
+	if (evdns_init() == -1) {
+		log_error("evdns_init: %s", strerror(errno));
+		goto err;
+	}
+
 	if (event_priority_init(NPRIOS) == -1) {
 		log_error("event_priority_set: %s", strerror(errno));
 		goto err;
@@ -233,7 +244,6 @@ accept_client(
 int		 cfd = -1, ret;
 listener_t	*l = arg;
 client_t	 *client = NULL;
-int		 one = 1;
 
 struct sockaddr_storage	addr;
 socklen_t		addrlen = sizeof(addr);
@@ -263,11 +273,160 @@ socklen_t		addrlen = sizeof(addr);
 			client->ip, sizeof (client->ip), NULL, 0, 
 			NI_NUMERICHOST);
 	if (ret != 0) {
-		log_error("accept_client: getnameinfo: %s\n", gai_strerror(ret));
+		client_error(client, "accept_client: getnameinfo: %s\n", gai_strerror(ret));
 		goto err;
 	}
 
-	if (setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
+	if (curconf->dodns)
+		client_lookup(client);
+	else
+		client_start(client);
+
+	return;
+
+err:
+	if (client)
+		client_abort(client);
+	else if (cfd != -1)
+		close(cfd);
+}
+
+void
+client_lookup(client_t *client)
+{
+	switch (client->addr.ss_family) {
+	case AF_INET: {
+	struct sockaddr_in *addr = (struct sockaddr_in *) &client->addr;
+		if (evdns_resolve_reverse(
+		    &addr->sin_addr,
+		    DNS_QUERY_NO_SEARCH,
+		    client_dns_reverse_done,
+		    client) == -1) {
+			client_error(client, "Reverse DNS lookup failed: %s",
+					strerror(errno));
+			client_start(client);
+		}
+		return;
+	}
+
+	case AF_INET6: {
+	struct sockaddr_in6 *addr = (struct sockaddr_in6 *) &client->addr;
+		if (evdns_resolve_reverse_ipv6(
+		    &addr->sin6_addr,
+		    DNS_QUERY_NO_SEARCH,
+		    client_dns_reverse_done,
+		    client) == -1) {
+			client_error(client, "Reverse DNS lookup failed: %s",
+					strerror(errno));
+			client_start(client);
+		}
+		return;
+	}
+
+	default:
+		client_start(client);
+		break;
+	}
+}
+
+void
+client_dns_reverse_done(
+	int	 result,
+	char	 type,
+	int	 count,
+	int	 ttl,
+	void	*addrs,
+	void	*arg
+)
+{
+client_t	*client = arg;
+
+	if (result != DNS_ERR_NONE || count == 0) {
+		strlcpy(client->hostname, client->ip, sizeof (client->hostname));
+		client_start(client);
+		return;
+	}
+
+	strlcpy(client->hostname, ((char **)addrs)[0], sizeof (client->hostname));
+
+	switch (client->addr.ss_family) {
+	case AF_INET:
+		if (evdns_resolve_ipv4(client->hostname,
+					DNS_QUERY_NO_SEARCH,
+					client_dns_forward_done,
+					client) == -1) {
+			client_error(client, "Reverse DNS lookup failed: %s",
+					strerror(errno));
+			strlcpy(client->hostname, client->ip, sizeof (client->hostname));
+			client_start(client);
+		}
+		break;
+
+	case AF_INET6:
+		if (evdns_resolve_ipv6(client->hostname,
+					DNS_QUERY_NO_SEARCH,
+					client_dns_forward_done,
+					client) == -1) {
+			client_error(client, "Reverse DNS lookup failed: %s",
+					strerror(errno));
+			strlcpy(client->hostname, client->ip, sizeof (client->hostname));
+			client_start(client);
+		}
+		break;
+
+	default:
+		abort();
+	}
+}
+
+void
+client_dns_forward_done(
+	int	 result,
+	char	 type,
+	int	 count,
+	int	 ttl,
+	void	*addrs,
+	void	*arg
+)
+{
+client_t	*client = arg;
+
+	if (result != DNS_ERR_NONE || count == 0) {
+		strlcpy(client->hostname, client->ip, sizeof (client->hostname));
+		client_start(client);
+		return;
+	}
+
+	switch (client->addr.ss_family) {
+	case AF_INET: {
+	struct sockaddr_in *addr = (struct sockaddr_in *) &client->addr;
+		if (memcmp(&addr->sin_addr, &((struct in_addr *) addrs)[0],
+				sizeof(addr->sin_addr)) != 0)
+			strlcpy(client->hostname, client->ip, sizeof (client->hostname));
+		client_start(client);
+		return;
+	}
+
+	case AF_INET6: {
+	struct sockaddr_in6 *addr = (struct sockaddr_in6 *) &client->addr;
+		if (memcmp(&addr->sin6_addr, &((struct in6_addr *) addrs)[0],
+				sizeof(addr->sin6_addr)) != 0)
+			strlcpy(client->hostname, client->ip, sizeof (client->hostname));
+		client_start(client);
+		return;
+	}
+
+	default:
+	       abort();
+	}
+}
+
+void
+client_start(client_t *client)
+{
+int	ret, one = 1;
+
+	if (setsockopt(client->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
 		client_error(client, "setsockopt(TCP_NODELAY): %s",
 				strerror(errno));
 		goto err;
@@ -279,10 +438,7 @@ socklen_t		addrlen = sizeof(addr);
 	return;
 
 err:
-	if (cfd != -1)
-		close(cfd);
-	if (client)
-		client_abort(client);
+	client_abort(client);
 }
 
 /*

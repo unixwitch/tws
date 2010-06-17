@@ -19,6 +19,11 @@ listen "0.0.0.0:80" {
 	protocol = ipv4
 }
 
+# Do reverse DNS lookups for clients.  This requires two DNS queries for
+# every request, and can significantly reduce perform in the event of
+# slow nameservers.
+resolve-hostnames = no
+
 # Client read timeout
 timeout = 60
 

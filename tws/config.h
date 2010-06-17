@@ -53,6 +53,7 @@ typedef struct {
 	GHashTable	*mimetypes;
 	char		*deftype;
 	GPtrArray	*indexes;
+	int		 dodns;
 } tws_config_t;
 
 tws_config_t	*curconf;

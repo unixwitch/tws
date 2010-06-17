@@ -104,6 +104,7 @@ typedef struct client {
 	struct sockaddr_storage	 addr;
 	socklen_t		 addrlen;
 	char			 ip[NI_MAXHOST];
+	char			 hostname[NI_MAXHOST];
 
 	struct event		 ev;
 	struct evbuffer		*buffer;

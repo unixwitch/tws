@@ -109,6 +109,7 @@ static cfg_opt_t opts[] = {
 	CFG_STR("user", 0, CFGF_NONE),
 	CFG_STR("group", 0, CFGF_NONE),
 	CFG_STR_LIST("index-file", "{}", CFGF_NONE),
+	CFG_BOOL("resolve-hostnames", 0, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -302,6 +303,8 @@ char		*s;
 		if ((tcfg->deftype = strdup(s)) == NULL)
 			goto err;
 	}
+
+	tcfg->dodns = cfg_getbool(cfg, "resolve-hostnames");
 
 	tcfg->indexes = g_ptr_array_new_with_free_func(free);
 
