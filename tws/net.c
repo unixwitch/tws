@@ -3,7 +3,10 @@
  * Use is subject to license terms.
  */
 
+#include	<sys/types.h>
 #include	<sys/socket.h>
+#include	<netinet/in.h>
+#include	<netinet/tcp.h>
 #include	<netdb.h>
 #include	<string.h>
 #include	<errno.h>
@@ -230,6 +233,7 @@ accept_client(
 int		 cfd = -1, ret;
 listener_t	*l = arg;
 client_t	 *client = NULL;
+int		 one = 1;
 
 struct sockaddr_storage	addr;
 socklen_t		addrlen = sizeof(addr);
@@ -260,6 +264,12 @@ socklen_t		addrlen = sizeof(addr);
 			NI_NUMERICHOST);
 	if (ret != 0) {
 		log_error("accept_client: getnameinfo: %s\n", gai_strerror(ret));
+		goto err;
+	}
+
+	if (setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
+		client_error(client, "setsockopt(TCP_NODELAY): %s",
+				strerror(errno));
 		goto err;
 	}
 
