@@ -54,6 +54,9 @@ typedef struct {
 	char		*deftype;
 	GPtrArray	*indexes;
 	int		 dodns;
+	int		 compr_level;
+	int		 compr_cgi;
+	GPtrArray	*compr_types;
 } tws_config_t;
 
 tws_config_t	*curconf;

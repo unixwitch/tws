@@ -6,7 +6,6 @@ AC_CONFIG_HEADERS([setup.h])
 AC_PROG_CC
 AC_PROG_INSTALL
 
-AC_CHECK_LIB([event], [main])
 PKG_CHECK_MODULES([GLIB], [glib-2.0])
 PKG_CHECK_MODULES([CONFUSE], [libconfuse])
 
@@ -50,6 +49,49 @@ AC_CHECK_HEADER(event.h, [], [
 ],)
 AC_CHECK_LIB(event, event_init, [], [
 	AC_MSG_ERROR([libevent is required to build TWS])
+	exit 1
+],)
+
+zlib_include=""
+zlib_lib=""
+AC_ARG_WITH(zlib,
+	AC_HELP_STRING([--with-zlib=PATH],[base directory for zlib]),
+	[
+		if test "x$withval" != "no"; then
+			zlib_include="$withval/include"
+			zlib_lib="$withval/lib"
+		fi
+	])
+
+AC_ARG_WITH([zlib-include],
+	AC_HELP_STRING([--with-zlib-include=PATH],[include directory for zlib]),
+	[
+		if test "x$withval" != "no"; then
+			zlib_include="$withval"
+		fi
+	])
+
+AC_ARG_WITH([zlib-lib],
+	AC_HELP_STRING([--with-zlib-lib=PATH],[library directory for zlib]),
+	[
+		if test "x$withval" != "no"; then
+			zlib_include="$withval"
+		fi
+	])
+
+if test "x$zlib_include" != "x"; then
+	CPPFLAGS="$CPPFLAGS -I$zlib_include"
+fi
+if test "x$zlib_lib" != "x"; then
+	LDFLAGS="$LDFLAGS -L$zlib_lib"
+fi
+
+AC_CHECK_HEADER(zlib.h, [], [
+	AC_MSG_ERROR([zlib is required to build TWS])
+	exit 1
+],)
+AC_CHECK_LIB(z, gzopen, [], [
+	AC_MSG_ERROR([zlib is required to build TWS])
 	exit 1
 ],)
 

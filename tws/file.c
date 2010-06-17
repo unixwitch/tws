@@ -17,6 +17,7 @@
 #include	<stdlib.h>
 #include	<stdio.h>
 #include	<pwd.h>
+#include	<fnmatch.h>
 
 #include	<glib.h>
 
@@ -49,7 +50,7 @@ char		*path, *end, *s, *t, *ext;
 int		 iscgi = 0;
 time_t		 now;
 struct tm	*tm;
-char		 tbuf[64];
+char		 tbuf[64], clen[64];
 char		*ims;
 
 	/*
@@ -100,8 +101,7 @@ char		*ims;
 			goto next;
 
 		if (stat(s, &sb) == -1) {
-			client_error(client, "%s: %s",
-				s, strerror(errno));
+			client_error(client, "%s", s, strerror(errno));
 
 			switch (errno) {
 			case EACCES:
@@ -229,40 +229,27 @@ next:
 
 	req->bytesleft = sb.st_size;
 
-	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 200 OK\r\n");
-	evbuffer_add_printf(client->wrbuf, "Server: %s\r\n",
-			server_version);
-	evbuffer_add_printf(client->wrbuf, "Content-Length: %lu\r\n",
-			(long unsigned) sb.st_size);
+	req->resp_status = "200 OK";
 
-	evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", current_time);
+	snprintf(clen, sizeof (clen), "%lu", (long unsigned) sb.st_size);
+	client_add_header(client, "Content-Length", clen);
 
+	time(&now);
 	if (sb.st_mtime > now)
 		sb.st_mtime = now;
 
 	tm = gmtime(&sb.st_mtime);
 	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
-	evbuffer_add_printf(client->wrbuf, "Last-Modified: %s\r\n", tbuf);
-
-	if (req->version == HTTP_10 && req->flags.keepalive)
-		evbuffer_add_printf(client->wrbuf,
-				"Connection: Keep-Alive\r\n");
+	client_add_header(client, "Last-Modified", tbuf);
 
 	if (req->mimetype)
-		evbuffer_add_printf(client->wrbuf,
-			"Content-Type: %s\r\n",
-			req->mimetype);
+		client_add_header(client, "Content-Type", req->mimetype);
 	else if (req->vhost->deftype)
-		evbuffer_add_printf(client->wrbuf,
-			"Content-Type: %s\r\n",
-			req->vhost->deftype);
+		client_add_header(client, "Content-Type", req->vhost->deftype);
 	else if (curconf->deftype)
-		evbuffer_add_printf(client->wrbuf,
-			"Content-Type: %s\r\n",
-			curconf->deftype);
+		client_add_header(client, "Content-Type", curconf->deftype);
 
-	evbuffer_add(client->wrbuf, "\r\n", 2);
-	client_drain(client, headers_done);
+	client_start_response(client, headers_done);
 }
 
 void
@@ -285,8 +272,9 @@ headers_done(
 		return;
 	}
 
+	/* sendfile cannot be used with compression */
 #ifdef USE_SENDFILE
-	if (curconf->use_sendfile) {
+	if (curconf->use_sendfile && !client->request->compress) {
 		event_set(&client->ev, client->fd, EV_WRITE, sendfile_callback, client);
 		sendfile_callback(client->fd, EV_WRITE, client);
 	} else
@@ -352,7 +340,7 @@ ssize_t		 n;
 		return;
 	}
 
-	evbuffer_add(client->wrbuf, buf, n);
+	client_write(client, buf, n);
 	client_drain(client, write_callback);
 }
 

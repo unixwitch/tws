@@ -20,7 +20,6 @@
 
 static void cgi_read_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
-static void cgi_last_chunk_done(client_t *, int);
 static void setup_cgi_environment(client_t *, GPtrArray *);
 static int spawn_cgi(
 	const char *dir,
@@ -55,7 +54,6 @@ request_t	*req = client->request;
 	/* Missing:
 	 * SERVER_ADMIN
 	 * SERVER_PORT
-	 * SERVER_SOFTWARE
 	 */
 	add_env(env, "PATH", "/bin:/usr/bin:/usr/local/bin");
 	add_env(env, "GATEWAY_INTERFACE", "CGI/1.1");
@@ -70,6 +68,7 @@ request_t	*req = client->request;
 	add_env(env, "SERVER_NAME", req->vhost->name);
 	add_env(env, "REMOTE_HOST", client->hostname);
 	add_env(env, "REMOTE_ADDR", client->ip);
+	add_env(env, "SERVER_SOFTWARE", server_version);
 
 	if (req->pathinfo)
 		add_env(env, "PATH_INFO", req->pathinfo);
@@ -234,7 +233,7 @@ cgi_read_callback(
 char		 buf[4096];
 ssize_t		 i;
 client_t	*client = arg;
-char		*line;
+char		*line, *s;
 GHashTableIter	 iter;
 char		*header, *value;
 int		 ret;
@@ -246,20 +245,7 @@ int		 ret;
 		i = read(client->request->fds[0], buf, sizeof (buf));
 
 		if (i == 0) {
-			/*
-			 * If we're not using chunked TE, and there was no
-			 * content-length in the CGI response, we can't
-			 * do keepalive here, so abort the client when
-			 * we're done writing.
-			 */
-			if (!client->request->flags.write_chunked &&
-			    !client->request->flags.cgi_had_cl) {
-				client_abort(client);
-				return;
-			}
-
-			evbuffer_add_printf(client->wrbuf, "0\r\n\r\n");
-			client_drain(client, cgi_last_chunk_done);
+			client_close(client);
 			return;
 		}
 
@@ -269,9 +255,7 @@ int		 ret;
 		}
 
 		if (i == -1) {
-			log_error("%s: read: %s",
-					client->request->filename,
-					strerror(errno));
+			client_error(client, "CGI read: %s", strerror(errno));
 			client_abort(client);
 			return;
 		}
@@ -322,48 +306,37 @@ int		 ret;
 			client_send_error(client, 500);
 			return;
 		}
-		*value++ = '\0';
+		*value = '\0';
+		value += 2;
+
+		/*
+		 * Don't let CGIs set certain headers which would confuse
+		 * the client.
+		 */
+		if (!strcmp(header, "Connection") ||
+		    !strcmp(header, "Transfer-Encoding"))
+			continue;
 
 		g_hash_table_replace(client->request->cgi_headers,
 				header, value);
 	}
 
-	if ((client->request->cgi_status = g_hash_table_lookup(
-	    client->request->cgi_headers, "Status")) != NULL) {
-		if (*client->request->cgi_status)
-			client->request->cgi_status++;
-		g_hash_table_remove(client->request->cgi_headers,
-				"Status");
+	/*
+	 * If the client set a status, use that, otherwise set our own.
+	 */
+	if ((s = g_hash_table_lookup(client->request->cgi_headers, "Status")) != NULL) {
+		client->request->resp_status = xstrdup(s);
+		g_hash_table_remove(client->request->cgi_headers, "Status");
 	} else
-		client->request->cgi_status = "200 OK";
+		client->request->resp_status = xstrdup("200 OK");
 
-	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 %s\r\n",
-			client->request->cgi_status);
-
+	/* Add all remaining headers */
 	g_hash_table_iter_init(&iter, client->request->cgi_headers);
 	while (g_hash_table_iter_next(&iter, (gpointer *) &header, (gpointer *) &value))
-		evbuffer_add_printf(client->wrbuf, "%s: %s\r\n",
-			header, value);
-	if (g_hash_table_lookup(client->request->cgi_headers, "Server") == NULL)
-		evbuffer_add_printf(client->wrbuf, "Server: %s\r\n",
-				server_version);
-	if (g_hash_table_lookup(client->request->cgi_headers, "Date") == NULL)
-		evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", current_time);
+		client_add_header(client, header, value);
 	
-	if (g_hash_table_lookup(client->request->cgi_headers, "Content-Length") == NULL) {
-		client->request->flags.cgi_had_cl = 0;
-		
-		if (client->request->flags.accept_chunked) {
-			evbuffer_add_printf(client->wrbuf,
-				"Transfer-Encoding: chunked\r\n");
-			client->request->flags.write_chunked = 1;
-		}
-	}
-
-	evbuffer_add_printf(client->wrbuf, "\r\n");
-
 	client->request->cgi_state = CGI_READ_BODY;
-	client_drain(client, client_write_callback);
+	client_start_response(client, client_write_callback);
 }
 
 
@@ -374,27 +347,10 @@ client_write_callback(
 )
 {
 	if (error) {
-		log_error("client_write_callback: %s",
-			strerror(errno));
+		client_error(client, "CGI write: %s", strerror(errno));
 		client_abort(client);
 		return;
 	}
 
 	event_add(&client->request->ev, NULL);
-}
-
-void
-cgi_last_chunk_done(
-	client_t	*client,
-	int		 error
-)
-{
-	if (error) {
-		log_error("client_write_callback: %s",
-			strerror(errno));
-		client_abort(client);
-		return;
-	}
-
-	client_close(client);
 }

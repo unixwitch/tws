@@ -110,6 +110,9 @@ static cfg_opt_t opts[] = {
 	CFG_STR("group", 0, CFGF_NONE),
 	CFG_STR_LIST("index-file", "{}", CFGF_NONE),
 	CFG_BOOL("resolve-hostnames", 0, CFGF_NONE),
+	CFG_INT("compression-level", 6, CFGF_NONE),
+	CFG_STR_LIST("compress-types", "{}", CFGF_NONE),
+	CFG_BOOL("compress-cgi", 0, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -305,6 +308,14 @@ char		*s;
 	}
 
 	tcfg->dodns = cfg_getbool(cfg, "resolve-hostnames");
+	tcfg->compr_level = cfg_getint(cfg, "compression-level");
+	tcfg->compr_cgi = cfg_getbool(cfg, "compress-cgi");
+	tcfg->compr_types = g_ptr_array_new_with_free_func(free);
+
+	for (i = 0, j = cfg_size(cfg, "compress-types"); i < j; i++)
+		g_ptr_array_add(
+			tcfg->compr_types,
+			xstrdup(cfg_getnstr(cfg, "compress-types", i)));
 
 	tcfg->indexes = g_ptr_array_new_with_free_func(free);
 

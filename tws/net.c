@@ -15,6 +15,7 @@
 #include	<fcntl.h>
 #include	<assert.h>
 #include	<stdio.h>
+#include	<fnmatch.h>
 
 #include	<glib.h>
 #include	<event.h>
@@ -39,6 +40,7 @@ static void client_dns_forward_done(int, char, int, int, void *, void *);
 static void client_read(int, short, void *);
 static int client_read_request(client_t *);
 static int client_read_header(client_t *);
+static void client_last_chunk_done(client_t *, int);
 static void error_done(client_t *, int);
 static void exit_signal(int, short, void *);
 static void update_time(int, short, void *);
@@ -241,6 +243,7 @@ request_t	*request;
 
 	request = xcalloc(1, sizeof (*request));
 	request->headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
+	request->resp_headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, free);
 	request->fds[0] = request->fds[1] = -1;
 
 	return request;
@@ -570,6 +573,30 @@ int		 ret;
 		g_strfreev(opts);
 	}
 
+	/*
+	 * Check if the client can support zlib or gzip compression, but
+	 * don't actually enable it yet.
+	 */
+	if ((conn = g_hash_table_lookup(req->headers, "Accept-Encoding")) != NULL) {
+	gchar	**opts, *opt, *s;
+		opts = g_strsplit(conn, ", ", 0);
+
+		for (opt = *opts; *opt; ++opt) {
+			if ((s = index(opt, ';')) != NULL)
+				*s = '\0';
+
+			if (!strcasecmp(opt, "deflate")) {
+				req->can_compress = COMP_DEFLATE;
+				break;
+			} else if (!strcasecmp(opt, "gzip") ||
+				   !strcasecmp(opt, "x-gzip")) {
+				req->can_compress = COMP_GZIP;
+				break;
+			}
+		}
+
+		g_strfreev(opts);
+	}
 	assert(client->state == HANDLE_REQUEST);
 	handle_file_request(client);
 }
@@ -674,7 +701,65 @@ client_abort(client_t *client)
 void
 client_close(client_t *client)
 {
-	if (!client->request->flags.keepalive) {
+	/*
+	 * Finish writing any compressed data.
+	 */
+	if (client->request->zstream) {
+	char	buf[16384];
+		client->request->zstream->avail_in = 0;
+		client->request->zstream->next_in = 0;
+
+		do {
+		size_t	n;
+			client->request->zstream->avail_out = sizeof (buf);
+			client->request->zstream->next_out = (Byte *) buf;
+
+			deflate(client->request->zstream, Z_FINISH);
+			n = sizeof(buf) - client->request->zstream->avail_out;
+
+			if (n) {
+				if (client->request->flags.write_chunked)
+					evbuffer_add_printf(client->wrbuf, "%lx\r\n",
+							(unsigned long) n);
+
+				evbuffer_add(client->wrbuf, buf, n);
+
+				if (client->request->flags.write_chunked)
+					evbuffer_add(client->wrbuf, "\r\n", 2);
+			}
+		} while (client->request->zstream->avail_out == 0);
+	}
+
+	if (client->request->flags.write_chunked) {
+		evbuffer_add(client->wrbuf, "0\r\n\r\n", 5);
+		client_drain(client, client_last_chunk_done);
+		return;
+	}
+
+	client_last_chunk_done(client, 0);
+}
+
+void
+client_last_chunk_done(
+	client_t	*client,
+	int		 error
+)
+{
+	if (error) {
+		client_error(client, "write error: %s",
+				strerror(errno));
+		client_abort(client);
+		return;
+	}
+
+	/*
+	 * If we didn't send a content-length and we're not using
+	 * chunked encoding, we can't do keep-alive, so abort the
+	 * connection.
+	 */
+	if (!client->request->flags.keepalive ||
+	    (!client->request->flags.write_chunked &&
+	     g_hash_table_lookup(client->request->resp_headers, "Content-Length") == NULL)) {
 		client_abort(client);
 		return;
 	}
@@ -791,14 +876,19 @@ free_request(request_t *req)
 	if (!req)
 		return;
 
-	if (req->headers)
-		g_hash_table_destroy(req->headers);
+	g_hash_table_destroy(req->headers);
+	g_hash_table_destroy(req->resp_headers);
 
 	free(req->method_str);
 	free(req->filename);
 	free(req->username);
 	free(req->pathinfo);
 	free(req->urlname);
+
+	if (req->zstream) {
+		deflateEnd(req->zstream);
+		free(req->zstream);
+	}
 
 	if (req->fd > 0)
 		close(req->fd);
@@ -934,11 +1024,39 @@ client_write(
 	size_t		 bufsz
 )
 {
-	if (client->request->flags.write_chunked)
-		evbuffer_add_printf(client->wrbuf, "%lx\r\n", (long unsigned) bufsz);
-	evbuffer_add(client->wrbuf, buf, bufsz);
-	if (client->request->flags.write_chunked)
-		evbuffer_add(client->wrbuf, "\r\n", 2);
+	if (client->request->compress) {
+	char	zbuf[16384];
+		client->request->zstream->next_in = (Byte *) buf;
+		client->request->zstream->avail_in = bufsz;
+
+		do {
+		size_t	n;
+			client->request->zstream->avail_out = sizeof (zbuf);
+			client->request->zstream->next_out = (Bytef *) zbuf;
+
+			deflate(client->request->zstream, Z_NO_FLUSH);
+			n = sizeof(zbuf) - client->request->zstream->avail_out;
+
+			if (n) {
+				if (client->request->flags.write_chunked)
+					evbuffer_add_printf(client->wrbuf, "%lx\r\n",
+							(unsigned long) n);
+
+				evbuffer_add(client->wrbuf, zbuf, n);
+
+				if (client->request->flags.write_chunked)
+					evbuffer_add(client->wrbuf, "\r\n", 2);
+			}
+		} while (client->request->zstream->avail_out == 0);
+	} else {
+		if (client->request->flags.write_chunked)
+			evbuffer_add_printf(client->wrbuf, "%lx\r\n", (long unsigned) bufsz);
+
+		evbuffer_add(client->wrbuf, buf, bufsz);
+
+		if (client->request->flags.write_chunked)
+			evbuffer_add(client->wrbuf, "\r\n", 2);
+	}
 }
 
 void
@@ -957,3 +1075,113 @@ va_list	 ap;
 
 	client_write(client, data, strlen(data));
 };
+
+void
+client_start_response(
+	client_t		*client,
+	client_drain_callback	 callback)
+{
+request_t	*req = client->request;
+GHashTableIter	 iter;
+char		*header, *value;
+
+	/*
+	 * If the client requested content compression and the MIME type
+	 * is acceptable, start zlib, unless we already sent a different
+	 * content-encoding header (e.g. from a CGI script).  Compression
+	 * cannot be used with Content-Length, so we remove the CL header.
+	 * It will be replaced with chunked TE later if the client
+	 * supports it.
+	 */
+	if (req->can_compress && req->mimetype && curconf->compr_level &&
+	    g_hash_table_lookup(req->resp_headers, "Content-Encoding") == NULL) {
+	guint   i, end;
+
+		for (i = 0, end = curconf->compr_types->len; i < end; ++i) {
+			if (fnmatch(g_ptr_array_index(curconf->compr_types, i),
+					req->mimetype, FNM_PATHNAME) == 0) {
+
+				req->zstream = xcalloc(1, sizeof (*req->zstream));
+
+				if (deflateInit2(
+				    req->zstream, curconf->compr_level,
+				    Z_DEFLATED, req->can_compress == COMP_DEFLATE ? 15 : 31, 
+				    8, Z_DEFAULT_STRATEGY) != Z_OK) {
+					client_error(client, "Zlib init failed: %s",
+						strerror(errno));
+					break;
+				}
+
+				req->compress = req->can_compress;
+
+				client_add_header(client, "Content-Encoding",
+					req->compress == COMP_DEFLATE ?
+						"deflate" : "gzip");
+				g_hash_table_remove(req->resp_headers,
+					"Content-Length");
+				break;
+			}
+		}
+	}
+
+	/*
+	 * If there's no content-length header, use chunked TE if the
+	 * client supports it.
+	 */
+	if (g_hash_table_lookup(req->resp_headers, "Content-Length") == NULL &&
+	    req->flags.accept_chunked) {
+		client_add_header(client, "Transfer-Encoding", "chunked");
+		req->flags.write_chunked = 1;
+	}
+
+	/*
+	 * Check if we can support keep-alive for this request.
+	 */
+	if ((g_hash_table_lookup(req->resp_headers, "Content-Length") != NULL ||
+	    req->flags.write_chunked) && req->flags.keepalive) {
+		/* HTTP/1.0 clients need a header to indicate we can do keep-alive */
+		if (req->version == HTTP_10) {
+			client_add_header(client, "Connection", "Keep-Alive");
+		}
+	} else {
+		/* HTTP/1.1 clients need a header to indicate we can't */
+		if (req->version == HTTP_11) {
+			client_add_header(client, "Connection", "close");
+		}
+	}
+
+	/*
+	 * Add standard headers, unless they're already there.
+	 */
+	if (g_hash_table_lookup(req->resp_headers, "Server") == NULL)
+		client_add_header(client, "Server", server_version);
+	if (g_hash_table_lookup(req->resp_headers, "Date") == NULL)
+		client_add_header(client, "Date", current_time);
+
+	/*
+	 * Write all headers to the client.
+	 */
+	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 %s\r\n",
+			req->resp_status);
+
+	g_hash_table_iter_init(&iter, client->request->resp_headers);
+
+	while (g_hash_table_iter_next(&iter, (gpointer *) &header, (gpointer *) &value))
+		evbuffer_add_printf(client->wrbuf, "%s: %s\r\n",
+			header, value);
+
+	evbuffer_add_printf(client->wrbuf, "\r\n");
+	client_drain(client, callback);
+
+}
+
+void
+client_add_header(
+	client_t	*client,
+	const char	*header,
+	const char	*value
+)
+{
+	g_hash_table_replace(client->request->resp_headers,
+			xstrdup(header), xstrdup(value));
+}

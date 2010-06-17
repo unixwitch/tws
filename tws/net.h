@@ -11,6 +11,7 @@
 
 #include	<event.h>
 #include	<glib.h>
+#include	<zlib.h>
 
 #include	"config.h"
 
@@ -98,6 +99,12 @@ typedef enum {
 	CGI_READ_BODY
 } cgi_state_t;
 
+typedef enum {
+	COMP_NONE = 0,
+	COMP_GZIP,
+	COMP_DEFLATE
+} compr_type_t;
+
 typedef struct {
 	GHashTable		*headers;
 	char			*method_str;
@@ -108,12 +115,19 @@ typedef struct {
 	vhost_t			*vhost;
 
 	struct {
-		int		 keepalive:1;
-		int		 userdir:1;
-		int		 accept_chunked:1;
-		int		 write_chunked:1;
-		int		 cgi_had_cl:1;
+		int		 keepalive:1;		/* Client wants keep-alive	*/
+		int		 userdir:1;		/* Request is ~user		*/
+		int		 accept_chunked:1;	/* Client supports chunked TE	*/
+		int		 write_chunked:1;	/* Chunked TE in effect		*/
 	} flags;
+
+	compr_type_t		 compress;
+	compr_type_t		 can_compress;
+	z_stream		*zstream;
+
+	/* Response headers */
+	GHashTable		*resp_headers;
+	char			*resp_status;
 
 	/* Common to file and CGI requests */
 	char	*filename;
@@ -134,7 +148,6 @@ typedef struct {
 	cgi_state_t	 cgi_state;
 
 	/* CGI headers read from the script */
-	char		*cgi_status;
 	GHashTable	*cgi_headers;
 	struct evbuffer	*cgi_buffer;
 } request_t;
@@ -172,6 +185,8 @@ typedef struct client {
 	void client_printf(client_t *, const char *fmt, ...);
 	void client_drain(client_t *, client_drain_callback);
 	void client_send_error(client_t *, int);
+	void client_start_response(client_t *, client_drain_callback);
+	void client_add_header(client_t *, const char *, const char *);
 
 	void client_error(client_t *, const char *fmt, ...);
 	void client_warn(client_t *, const char *fmt, ...);
