@@ -29,6 +29,7 @@ static void client_write(int, short, void *);
 static int client_read_request(client_t *);
 static int client_read_header(client_t *);
 static void error_done(client_t *, int);
+static void exit_signal(int, short, void *);
 
 static GArray	*listeners;
 
@@ -150,6 +151,8 @@ int
 net_listen()
 {
 guint	i;
+static struct event ev_sigint;
+static struct event ev_sigterm;
 
 	if (event_init() == NULL) {
 		log_error("event_init: %s", strerror(errno));
@@ -168,6 +171,11 @@ guint	i;
 		if (setup_listener(g_array_index(curconf->listeners, tws_listen_t *, i)) == -1)
 			goto err;
 	}
+
+	event_set(&ev_sigint, SIGINT, EV_SIGNAL, exit_signal, NULL);
+	event_set(&ev_sigterm, SIGINT, EV_SIGNAL, exit_signal, NULL);
+	event_add(&ev_sigint, NULL);
+	event_add(&ev_sigterm, NULL);
 
 	return 0;
 
@@ -699,4 +707,15 @@ va_list	ap;
 	va_end(ap);
 	snprintf(msg, sizeof (msg), "%s %s", cbuf, err);
 	log_notice("%s", msg);
+}
+
+void
+exit_signal(
+	int	signal,
+	short	what,
+	void	*arg
+)
+{
+	log_notice("Exiting on signal");
+	event_loopbreak();
 }
