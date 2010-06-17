@@ -9,6 +9,7 @@
 #include	<stdarg.h>
 
 #include	"log.h"
+#include	"net.h"
 
 FILE	*logfile;
 
@@ -30,17 +31,11 @@ vlog(type, fmt, ap)
 	const char	*fmt;
 	va_list		 ap;
 {
-char		 tbuf[128];
-time_t		 now;
-struct tm	*tm;
 static const char *const types[] = {
 	"NOTICE", "WARNING", "ERROR"
 };
 
-	(void) time(&now);
-	tm = localtime(&now);
-	(void) strftime(tbuf, sizeof (tbuf), "%Y-%m-%d %H:%M:%S", tm);
-	(void) fprintf(logfile, "[%s] %s: ", tbuf, types[type]);
+	(void) fprintf(logfile, "[%s] %s: ", current_time, types[type]);
 	(void) vfprintf(logfile, fmt, ap);
 	(void) fputc('\n', logfile);
 	}

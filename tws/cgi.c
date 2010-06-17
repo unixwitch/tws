@@ -327,18 +327,10 @@ int		 ret;
 		evbuffer_add_printf(client->wrbuf, "%s: %s\r\n",
 			header, value);
 	if (g_hash_table_lookup(client->request->cgi_headers, "Server") == NULL)
-		evbuffer_add_printf(client->wrbuf, "Server: Toolserver-Web-Server/%s\r\n",
-				PACKAGE_VERSION);
-	if (g_hash_table_lookup(client->request->cgi_headers, "Date") == NULL) {
-	time_t		 now;
-	struct tm	*tm;
-	char		 tbuf[64];
-
-		time(&now);
-		tm = gmtime(&now);
-		strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
-		evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", tbuf);
-	}
+		evbuffer_add_printf(client->wrbuf, "Server: %s\r\n",
+				server_version);
+	if (g_hash_table_lookup(client->request->cgi_headers, "Date") == NULL)
+		evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", current_time);
 	evbuffer_add_printf(client->wrbuf, "\r\n");
 	
 	client->request->cgi_state = CGI_READ_BODY;

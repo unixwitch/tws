@@ -43,6 +43,8 @@ int		 c;
 	(void) argc;
 	(void) argv;
 
+	net_init();
+
 	while ((c = getopt(argc, argv, "c:fh")) != -1) {
 		switch (c) {
 		case 'c':

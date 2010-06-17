@@ -27,6 +27,9 @@
 #include	"setup.h"
 #include	"util.h"
 
+char current_time[64] = "Thu, 1 Jan 1970 00:00:00 GMT";
+char *server_version;
+
 static void accept_client(int, short, void *);
 static void client_start(client_t *);
 static void client_lookup(client_t *);
@@ -39,6 +42,7 @@ static int client_read_request(client_t *);
 static int client_read_header(client_t *);
 static void error_done(client_t *, int);
 static void exit_signal(int, short, void *);
+static void update_time(int, short, void *);
 
 static GArray	*listeners;
 
@@ -162,6 +166,11 @@ net_listen()
 guint	i;
 static struct event ev_sigint;
 static struct event ev_sigterm;
+static struct event ev_time;
+struct timeval timeout = { 1, 0 };
+
+	server_version = g_strdup_printf("Toolserver-Web-Server/%s",
+			PACKAGE_VERSION);
 
 	if (event_init() == NULL) {
 		log_error("event_init: %s", strerror(errno));
@@ -190,6 +199,9 @@ static struct event ev_sigterm;
 	event_set(&ev_sigterm, SIGINT, EV_SIGNAL, exit_signal, NULL);
 	event_add(&ev_sigint, NULL);
 	event_add(&ev_sigterm, NULL);
+
+	event_set(&ev_time, 0, EV_TIMEOUT, update_time, NULL);
+	event_add(&ev_time, &timeout);
 
 	return 0;
 
@@ -710,9 +722,6 @@ client_send_error(
 {
 const char	*status;
 const char	*body = NULL;
-time_t		 now;
-struct tm	*tm;
-char		 tbuf[64];
 
 	switch (code) {
 	case 304:
@@ -742,18 +751,14 @@ char		 tbuf[64];
 		break;
 	}
 
-	time(&now);
-	tm = gmtime(&now);
-	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
-
 	evbuffer_add_printf(client->wrbuf, 
 			"HTTP/%s %d %s\r\n"
-			"Server: Toolserver-Web-Server/%s\r\n"
+			"Server: %s\r\n"
 			"Date: %s\r\n"
 			"Content-Type: text/plain\r\n"
 			"Content-Length: %d\r\n\r\n",
 			client->request->version == HTTP_10 ? "1.0" : "1.1",
-			code, status, PACKAGE_VERSION, tbuf,
+			code, status, server_version, current_time,
 			body ? (int) strlen(body) : 0);
 
 	if (body)
@@ -890,4 +895,25 @@ exit_signal(
 {
 	log_notice("Exiting on signal");
 	event_loopbreak();
+}
+
+void
+update_time(
+	int	fd,
+	short	what,
+	void	*arg
+)
+{
+time_t		 now;
+struct tm	*tm;
+
+	time(&now);
+	tm = gmtime(&now);
+	strftime(current_time, sizeof (current_time), "%a, %d %b %Y %H:%M:%S GMT", tm);
+}
+
+void
+net_init(void)
+{
+	update_time(0, 0, NULL);
 }

@@ -20,6 +20,9 @@
 
 #define READ_BUFSZ	1024
 
+extern char *server_version;
+extern char current_time[];
+
 /*
  * Event priorities.  We prioritise writing to clients first, followed
  * by reading existing clients, following by accepting new clients.  The
@@ -129,6 +132,7 @@ typedef struct client {
 	void client_warn(client_t *, const char *fmt, ...);
 	void client_notice(client_t *, const char *fmt, ...);
 
+	void net_init(void);
 	int net_listen(void);
 	void net_run(void);
 

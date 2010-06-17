@@ -208,15 +208,12 @@ next:
 	req->bytesleft = sb.st_size;
 
 	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 200 OK\r\n");
-	evbuffer_add_printf(client->wrbuf, "Server: Toolserver-Web-Server/%s\r\n",
-			PACKAGE_VERSION);
+	evbuffer_add_printf(client->wrbuf, "Server: %s\r\n",
+			server_version);
 	evbuffer_add_printf(client->wrbuf, "Content-Length: %lu\r\n",
 			(long unsigned) sb.st_size);
 
-	time(&now);
-	tm = gmtime(&now);
-	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
-	evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", tbuf);
+	evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", current_time);
 
 	if (sb.st_mtime > now)
 		sb.st_mtime = now;
