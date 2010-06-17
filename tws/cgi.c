@@ -20,6 +20,7 @@
 
 static void cgi_read_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
+static void cgi_last_chunk_done(client_t *, int);
 static void setup_cgi_environment(client_t *, GPtrArray *);
 static int spawn_cgi(
 	const char *dir,
@@ -141,7 +142,6 @@ const char	*dir = NULL;
 char		 dirs[1024];
 request_t	*req = client->request;
 
-	req->fds[0] = req->fds[1] = -1;
 	req->cgi_state = CGI_READ_HEADERS;
 
 	if (pipe(req->fds) == -1) {
@@ -154,7 +154,7 @@ request_t	*req = client->request;
 	envp = g_ptr_array_new_with_free_func(free);
 
 	/* Set up argv */
-	if (!req->vhost->suexec_enable || !req->userdir) {
+	if (!req->vhost->suexec_enable || !req->flags.userdir) {
 		g_ptr_array_add(argv, req->filename);
 		g_ptr_array_add(argv, NULL);
 	} else if (req->vhost->suexec_enable) {
@@ -165,11 +165,9 @@ request_t	*req = client->request;
 			goto err;
 		}
 
-		printf("suexec urlname=[%s]\n", req->urlname);
-
 		snprintf(gid, sizeof (gid), "%d", (int) pwd->pw_gid);
 		snprintf(un, sizeof (un), "%s%s",
-			req->userdir ? "~" : "", req->username);
+			req->flags.userdir ? "~" : "", req->username);
 
 		g_ptr_array_add(argv, SUEXEC);
 		g_ptr_array_add(argv, un);
@@ -178,7 +176,7 @@ request_t	*req = client->request;
 		g_ptr_array_add(argv, NULL);
 
 		/* suexec requires us to chdir to the document root */
-		if (req->userdir)
+		if (req->flags.userdir)
 			snprintf(dirs, sizeof (dirs), "%s/%s", 
 				pwd->pw_dir, req->vhost->userdir);
 		else
@@ -200,6 +198,8 @@ request_t	*req = client->request;
 	}
 
 	close(req->fds[1]);
+	req->fds[1] = -1;
+
 	g_ptr_array_free(envp, TRUE);
 	g_ptr_array_free(argv, TRUE);
 
@@ -217,7 +217,6 @@ err:
 		g_ptr_array_free(envp, TRUE);
 	if (argv)
 		g_ptr_array_free(argv, TRUE);
-
 	if (req->fds[0] != -1)
 		close(req->fds[0]);
 	if (req->fds[1] != -1)
@@ -247,7 +246,20 @@ int		 ret;
 		i = read(client->request->fds[0], buf, sizeof (buf));
 
 		if (i == 0) {
-			client_abort(client);
+			/*
+			 * If we're not using chunked TE, and there was no
+			 * content-length in the CGI response, we can't
+			 * do keepalive here, so abort the client when
+			 * we're done writing.
+			 */
+			if (!client->request->flags.write_chunked &&
+			    !client->request->flags.cgi_had_cl) {
+				client_abort(client);
+				return;
+			}
+
+			evbuffer_add_printf(client->wrbuf, "0\r\n");
+			client_drain(client, cgi_last_chunk_done);
 			return;
 		}
 
@@ -264,7 +276,7 @@ int		 ret;
 			return;
 		}
 
-		evbuffer_add(client->wrbuf, buf, i);
+		client_write(client, buf, i);
 		client_drain(client, client_write_callback);
 		return;
 	}
@@ -319,6 +331,9 @@ int		 ret;
 	if ((client->request->cgi_status = g_hash_table_lookup(
 	    client->request->cgi_headers, "Status")) == NULL)
 		client->request->cgi_status = "200 OK";
+	else
+		g_hash_table_remove(client->request->cgi_headers,
+				"Status");
 
 	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 %s\r\n",
 			client->request->cgi_status);
@@ -332,8 +347,19 @@ int		 ret;
 				server_version);
 	if (g_hash_table_lookup(client->request->cgi_headers, "Date") == NULL)
 		evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", current_time);
-	evbuffer_add_printf(client->wrbuf, "\r\n");
 	
+	if (g_hash_table_lookup(client->request->cgi_headers, "Content-Length") == NULL) {
+		client->request->flags.cgi_had_cl = 0;
+		
+		if (client->request->flags.accept_chunked) {
+			evbuffer_add_printf(client->wrbuf,
+				"Transfer-Encoding: chunked\r\n");
+			client->request->flags.write_chunked = 1;
+		}
+	}
+
+	evbuffer_add_printf(client->wrbuf, "\r\n");
+
 	client->request->cgi_state = CGI_READ_BODY;
 	client_drain(client, client_write_callback);
 }
@@ -353,4 +379,20 @@ client_write_callback(
 	}
 
 	event_add(&client->request->ev, NULL);
+}
+
+void
+cgi_last_chunk_done(
+	client_t	*client,
+	int		 error
+)
+{
+	if (error) {
+		log_error("client_write_callback: %s",
+			strerror(errno));
+		client_abort(client);
+		return;
+	}
+
+	client_close(client);
 }

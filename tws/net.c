@@ -37,7 +37,6 @@ static void client_dns(client_t *);
 static void client_dns_reverse_done(int, char, int, int, void *, void *);
 static void client_dns_forward_done(int, char, int, int, void *, void *);
 static void client_read(int, short, void *);
-static void client_write(int, short, void *);
 static int client_read_request(client_t *);
 static int client_read_header(client_t *);
 static void error_done(client_t *, int);
@@ -242,6 +241,7 @@ request_t	*request;
 
 	request = xcalloc(1, sizeof (*request));
 	request->headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
+	request->fds[0] = request->fds[1] = -1;
 
 	return request;
 }
@@ -528,23 +528,45 @@ int		 ret;
 	 * See if we should do keep-alive.
 	 */
 	/* Default to keep-alive in http/1.1 */
-	req->keepalive = req->version == HTTP_11;
+	req->flags.keepalive = req->version == HTTP_11;
 
 	if ((conn = g_hash_table_lookup(req->headers, "Connection")) != NULL) {
 	gchar	**opts, *opt;
 		opts = g_strsplit(conn, ", ", 0);
+
 		for (opt = *opts; *opt; ++opt) {
 			/* In HTTP/1.1, Connection: close disabled keep-alive.
 			 * In HTTP/1.0, Connection: Keep-Alive enables it.
 			 */
 			if (!strcasecmp(opt, "close")) {
-				req->keepalive = 0;
+				req->flags.keepalive = 0;
 				break;
 			} else if (!strcasecmp(opt, "Keep-Alive")) {
-				req->keepalive = 1;
+				req->flags.keepalive = 1;
 				break;
 			}
 		}
+		g_strfreev(opts);
+	}
+
+	/*
+	 * Check if the client wants chunked TE.  We only actually use it
+	 * for CGI requests without a content-length.
+	 */
+	if ((conn = g_hash_table_lookup(req->headers, "TE")) != NULL) {
+	gchar	**opts, *opt, *s;
+		opts = g_strsplit(conn, ", ", 0);
+
+		for (opt = *opts; *opt; ++opt) {
+			if ((s = index(opt, ';')) != NULL)
+				*s = '\0';
+
+			if (!strcasecmp(opt, "chunked")) {
+				req->flags.accept_chunked = 1;
+				break;
+			}
+		}
+
 		g_strfreev(opts);
 	}
 
@@ -635,19 +657,6 @@ request_t	*req = client->request;
 	return 0;
 }
 
-/*
- * Ready to write more data to the client.
- */
-void
-client_write(
-	int	 fd,
-	short	 what,
-	void	*arg
-)
-{
-client_t	*cli = arg;
-}
-
 void
 client_abort(client_t *client)
 {
@@ -665,7 +674,7 @@ client_abort(client_t *client)
 void
 client_close(client_t *client)
 {
-	if (!client->request->keepalive) {
+	if (!client->request->flags.keepalive) {
 		client_abort(client);
 		return;
 	}
@@ -791,12 +800,12 @@ free_request(request_t *req)
 	free(req->pathinfo);
 	free(req->urlname);
 
-	if (req->fd)
+	if (req->fd > 0)
 		close(req->fd);
 
-	if (req->fds[0])
+	if (req->fds[0] > 0)
 		close(req->fds[0]);
-	if (req->fds[1])
+	if (req->fds[1] > 0)
 		close(req->fds[1]);
 	free(req);
 }
@@ -917,3 +926,32 @@ net_init(void)
 {
 	update_time(0, 0, NULL);
 }
+
+void
+client_write(
+	client_t	*client,
+	const char	*buf,
+	size_t		 bufsz
+)
+{
+	if (client->request->flags.write_chunked)
+		evbuffer_add_printf(client->wrbuf, "%lx\r\n", (long unsigned) bufsz);
+	evbuffer_add(client->wrbuf, buf, bufsz);
+}
+
+void
+client_printf(
+	client_t	*client,
+	const char	*fmt,
+	...
+)
+{
+char	*data;
+va_list	 ap;
+
+	va_start(ap, fmt);
+	data = g_strdup_vprintf(fmt, ap);
+	va_end(ap);
+
+	client_write(client, data, strlen(data));
+};

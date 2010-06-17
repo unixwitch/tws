@@ -81,7 +81,6 @@ char		*ims;
 		req->urlname = xstrdup(req->url + 1);
 	}
 
-	printf("filename=[%s]\n", req->filename);
 	/*
 	 * Traverse the filename, and check each component of the path.  If
 	 * we end up at a file, the remainder of the URL is path info.
@@ -245,7 +244,7 @@ next:
 	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
 	evbuffer_add_printf(client->wrbuf, "Last-Modified: %s\r\n", tbuf);
 
-	if (req->version == HTTP_10 && req->keepalive)
+	if (req->version == HTTP_10 && req->flags.keepalive)
 		evbuffer_add_printf(client->wrbuf,
 				"Connection: Keep-Alive\r\n");
 
@@ -385,7 +384,7 @@ char		*uname, *s, *fname;
 		*s++ = '\0';
 
 	req->username = strdup(uname);
-	req->userdir = 1;
+	req->flags.userdir = 1;
 
 	if ((pwd = getpwnam(uname)) == NULL) {
 		free(uname);

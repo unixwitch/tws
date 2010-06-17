@@ -106,7 +106,14 @@ typedef struct {
 	http_version_t		 version;
 	http_method_t		 method;
 	vhost_t			*vhost;
-	int			 keepalive;
+
+	struct {
+		int		 keepalive:1;
+		int		 userdir:1;
+		int		 accept_chunked:1;
+		int		 write_chunked:1;
+		int		 cgi_had_cl:1;
+	} flags;
 
 	/* Common to file and CGI requests */
 	char	*filename;
@@ -114,7 +121,6 @@ typedef struct {
 	char	*username;
 	char	*pathinfo;
 	char	*mimetype;
-	int	 userdir;
 
 	/* For file requests */
 	int	 fd;
@@ -162,6 +168,8 @@ typedef struct client {
 
 	void client_close(client_t *);
 	void client_abort(client_t *);
+	void client_write(client_t *, const char *buf, size_t sz);
+	void client_printf(client_t *, const char *fmt, ...);
 	void client_drain(client_t *, client_drain_callback);
 	void client_send_error(client_t *, int);
 
