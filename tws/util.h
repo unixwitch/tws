@@ -11,4 +11,6 @@
 	void *xmalloc(size_t);
 	void *xcalloc(size_t, size_t);
 
+	char *htmlescape(const char *str);
+
 #endif	/* !TWS_UTIL_H */

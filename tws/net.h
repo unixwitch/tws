@@ -187,6 +187,7 @@ typedef struct client {
 	void client_send_error(client_t *, int);
 	void client_start_response(client_t *, client_drain_callback);
 	void client_add_header(client_t *, const char *, const char *);
+	void client_redirect(client_t *, const char *, int);
 
 	void client_error(client_t *, const char *fmt, ...);
 	void client_warn(client_t *, const char *fmt, ...);

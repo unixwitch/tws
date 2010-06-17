@@ -18,6 +18,7 @@
 #include	<stdio.h>
 #include	<pwd.h>
 #include	<fnmatch.h>
+#include	<dirent.h>
 
 #include	<glib.h>
 
@@ -37,6 +38,7 @@ static void headers_done(client_t *, int);
 static void error_done(client_t *, int);
 static char *get_filename(request_t *);
 static char *get_userdir(request_t *);
+static void handle_directory(client_t *);
 
 void
 handle_file_request(
@@ -207,6 +209,23 @@ next:
 	if (fstat(req->fd, &sb) == -1) {
 		client_error(client, "%s", strerror(errno));
 		client_send_error(client, 404);
+		return;
+	}
+
+	if (S_ISDIR(sb.st_mode)) {
+		close(req->fd);
+		req->fd = -1;
+
+		if (req->url[strlen(req->url) - 1] != '/') {
+		char	*rdname = xmalloc(strlen(req->url) + 2);
+
+			sprintf(rdname, "%s/", req->url);
+			client_redirect(client, rdname, HTTP_MOVED_PERMANENTLY);
+			free(rdname);
+			return;
+		}
+
+		handle_directory(client);
 		return;
 	}
 
@@ -395,4 +414,158 @@ char		*uname, *s, *fname;
 
 	free(uname);
 	return fname;
+}
+
+typedef struct direntry {
+	char	*name;
+	time_t	 mtime;
+	int	 isdir;
+	off_t	 size;
+} direntry_t;
+
+static int
+dircmp(gconstpointer a, gconstpointer b)
+{
+const direntry_t	*da = a, *db = b;
+	return strcmp(da->name, db->name);
+}
+
+static void
+dir_write_done(client_t *client, int error)
+{
+	if (error) {
+		client_error(client, "write: %s",
+				strerror(error));
+		client_abort(client);
+		return;
+	}
+
+	client_close(client);
+}
+
+void
+handle_directory(client_t *client)
+{
+GArray		*dirents = NULL;
+DIR		*dir = NULL;
+struct dirent	*de;
+char		 p[PATH_MAX];
+guint		 i, end;
+char		*escurl;
+
+	client_add_header(client, "Content-Type", "text/html");
+
+	if ((dir = opendir(client->request->filename)) == NULL) {
+		client_error(client, "opendir: %s", strerror(errno));
+		goto err;
+	}
+
+	dirents = g_array_new(FALSE, FALSE, sizeof (direntry_t));
+
+	escurl = htmlescape(client->request->url);
+	client_printf(client,
+"<html>\n"
+"  <head>\n"
+"    <title>Index of %1$s</title>\n"
+"    <style text=\"text/css\">\n"
+"      body {\n"
+"        background-color: white;\n"
+"        color: black;\n"
+"        font-family: sans-serif;\n"
+"      }\n"
+"      h1 {\n"
+"        font-size: 150%%;\n"
+"      }\n"
+"      th {\n"
+"        border-bottom: dashed 1px black;\n"
+"      }\n"
+"      td {\n"
+"        padding: 0 1em 0 1em;\n"
+"      }\n"
+"      p.footer {\n"
+"        color: #555;\n"
+"        margin-top: 1em;\n"
+"        padding-top: 0.2em;\n"
+"        border-top: solid 1px #777;\n"
+"        font-size: x-small;\n"
+"      }\n"
+"    </style>\n"
+"  </head>\n"
+"  <body>\n"
+"    <h1>Index of %1$s</h1>\n"
+"    <table>\n"
+"      <tr> <th>Name</th> <th>Size</th> <th>Modified</th> </tr>\n",
+		escurl);
+	free(escurl);
+
+	while ((de = readdir(dir)) != NULL) {
+	struct direntry	ent;
+	struct stat	sb;
+
+		if (*de->d_name == '.')
+			continue;
+
+		bzero(&ent, sizeof(ent));
+		ent.name = htmlescape(de->d_name);
+
+		snprintf(p, sizeof (p), "%s/%s", client->request->filename, de->d_name);
+		if (stat(p, &sb) == -1) {
+			client_error(client, "%s: stat: %s",
+					p, strerror(errno));
+			free(ent.name);
+			continue;
+		}
+
+		if (S_ISDIR(sb.st_mode))
+			ent.isdir = 1;
+		ent.size = sb.st_size;
+		ent.mtime = sb.st_mtime;
+		g_array_append_val(dirents, ent);
+	}
+
+	closedir(dir);
+	dir = NULL;
+
+	g_array_sort(dirents, dircmp);
+
+	for (i = 0, end = dirents->len; i < end; ++i) {
+	direntry_t	*ent = &g_array_index(dirents, direntry_t, i);
+	char		*size = g_format_size_for_display(ent->size);
+	char		 tbuf[64];
+	struct tm	*tm;
+
+		tm = localtime(&ent->mtime);
+		strftime(tbuf, sizeof (tbuf), "%Y-%m-%d %H:%M", tm);
+		client_printf(client, "      <tr> <td><a href=\"%1$s%2$s\">%1$s%2$s</a></td> "
+				      "<td>%3$s</td> <td>%4$s</td> </tr>\n",
+			ent->name, ent->isdir ? "/" : "", size, tbuf);
+		free(ent->name);
+	}
+
+	g_array_free(dirents, TRUE);
+
+	client_printf(client,
+"    </table>\n"
+"\n"
+"  <p class=\"footer\">\n"
+"    %s at %s\n"
+"  </p>\n"
+"\n"
+"  </body>\n"
+"</html>\n",
+	server_version, client->request->vhost->name);
+
+	client_drain(client, dir_write_done);
+	return;
+
+err:
+	for (i = 0, end = dirents->len; i < end; ++i) {
+	direntry_t	*ent = &g_array_index(dirents, direntry_t, i);
+		free(ent->name);
+	}
+
+	g_array_free(dirents, TRUE);
+
+	if (dir)
+		closedir(dir);
 }

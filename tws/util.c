@@ -43,3 +43,47 @@ outofmemory()
 	log_error("out of memory");
 	_exit(1);
 }
+
+char *
+htmlescape(const char *str)
+{
+char	*res = xmalloc(strlen(str) * 7 + 1);
+char	*s = res;
+
+	*s = 0;
+
+	while (*str) {
+		switch (*str) {
+		case '<':
+			strcat(s, "&lt;");
+			s += 4;
+			break;
+		case '>':
+			strcat(s, "&gt;");
+			s += 4;
+			break;
+		case '&':
+			strcat(s, "&amp;");
+			s += 5;
+			break;
+		case '"':
+			strcat(s, "&dquot;");
+			s += 7;
+			break;
+		case '\'':
+			strcat(s, "&quot;");
+			s += 6;
+			break;
+		default:
+			*s++ = *str;
+			break;
+		}
+
+		str++;
+	}
+
+	*s = 0;
+	return res;
+}
+
+

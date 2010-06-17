@@ -845,9 +845,7 @@ const char	*body = NULL;
 		break;
 
 	default:
-		status = "Unknown";
-		body = "An unknown error occurred.\n";
-		break;
+		abort();
 	}
 
 	evbuffer_add_printf(client->wrbuf, 
@@ -866,6 +864,46 @@ const char	*body = NULL;
 	client_drain(client, error_done);
 }
 
+void
+client_redirect(
+	client_t	*client,
+	const char	*where,
+	int		 code
+)
+{
+const char	*status;
+
+	switch (code) {
+	case HTTP_MOVED_PERMANENTLY:
+		status = "Moved permanently";
+		break;
+
+	case HTTP_FOUND:
+		status = "Found";
+		break;
+
+	case HTTP_SEE_OTHER:
+		status = "See other";
+
+	case HTTP_TEMPORARY_REDIRECT:
+		status = "Temporary redirect";
+
+	default:
+		abort();
+	}
+
+	evbuffer_add_printf(client->wrbuf, 
+			"HTTP/%s %d %s\r\n"
+			"Server: %s\r\n"
+			"Date: %s\r\n"
+			"Location: %s\r\n"
+			"Content-Type: text/plain\r\n"
+			"Content-Length: 0\r\n\r\n",
+			client->request->version == HTTP_10 ? "1.0" : "1.1",
+			code, status, server_version, current_time, where);
+
+	client_drain(client, error_done);
+}
 void
 error_done(
 	client_t	*client,
