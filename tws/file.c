@@ -325,7 +325,7 @@ write_callback(
 {
 int		 ret;
 off_t		 done;
-char		 buf[4096];
+static char	 buf[1024 * 256];
 ssize_t		 n;
 	
 	n = read(client->request->fd, buf, sizeof (buf));
