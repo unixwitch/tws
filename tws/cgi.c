@@ -90,6 +90,8 @@ request_t	*req = client->request;
 
 		add_env(env, hdr, value);
 	}
+
+	g_ptr_array_add(env, NULL);
 }
 
 pid_t
