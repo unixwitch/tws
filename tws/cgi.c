@@ -230,7 +230,7 @@ err:
 		close(req->fds[0]);
 	if (req->fds[1] != -1)
 		close(req->fds[1]);
-	client_send_error(client, 500);
+	client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
 }
 
 static void
@@ -287,13 +287,13 @@ int		 ret;
 		}
 
 		client_error(client, "CGI read: %s", strerror(errno));
-		client_send_error(client, 500);
+		client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
 		return;
 	}
 
 	if (ret == 0) {
 		client_error(client, "EOF reading CGI response headers");
-		client_send_error(client, 500);
+		client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
 		return;
 	}
 
@@ -313,7 +313,7 @@ int		 ret;
 		header = line;
 		if ((value = strstr(line, ": ")) == NULL) {
 			client_error(client, "CGI read: invalid header: %s", header);
-			client_send_error(client, 500);
+			client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
 			return;
 		}
 		*value = '\0';

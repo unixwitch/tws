@@ -107,16 +107,16 @@ char		*ims;
 
 			switch (errno) {
 			case EACCES:
-				client_send_error(client, 403);
+				client_send_error(client, HTTP_FORBIDDEN);
 				return;
 			default:
-				client_send_error(client, 404);
+				client_send_error(client, HTTP_NOT_FOUND);
 				return;
 			}
 		}
 
 		if ((u = rindex(s, '/')) && !strcmp(u, "/..")) {
-			client_send_error(client, 404);
+			client_send_error(client, HTTP_NOT_FOUND);
 			return;
 		}
 
@@ -182,7 +182,7 @@ next:
 
 	/* We only support GET and HEAD for files */
 	if (req->method != M_GET && req->method != M_HEAD) {
-		client_send_error(client, 403);
+		client_send_error(client, HTTP_FORBIDDEN);
 		return;
 	}
 
@@ -191,7 +191,7 @@ next:
 
 		switch (errno) {
 		case EACCES:
-			client_send_error(client, 403);
+			client_send_error(client, HTTP_FORBIDDEN);
 			break;
 
 		/*
@@ -201,7 +201,7 @@ next:
 		 * file.
 		 */
 		default:
-			client_send_error(client, 404);
+			client_send_error(client, HTTP_NOT_FOUND);
 			break;
 		}
 
@@ -210,7 +210,7 @@ next:
 
 	if (fstat(req->fd, &sb) == -1) {
 		client_error(client, "%s", strerror(errno));
-		client_send_error(client, 404);
+		client_send_error(client, HTTP_NOT_FOUND);
 		return;
 	}
 
@@ -233,7 +233,7 @@ next:
 
 	if (!S_ISREG(sb.st_mode)) {
 		client_error(client, "not a regular file");
-		client_send_error(client, 403);
+		client_send_error(client, HTTP_FORBIDDEN);
 		return;
 	}
 
@@ -242,7 +242,7 @@ next:
 	struct tm	stm;
 		if (strptime(ims, "%b, %d %a %Y %H:%M:%S GMT", &stm) != NULL) {
 			if (timegm(&stm) >= sb.st_mtime) {
-				client_send_error(client, 304);
+				client_send_error(client, HTTP_NOT_MODIFIED);
 				return;
 			}
 		}
