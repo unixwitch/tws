@@ -8,6 +8,8 @@
 
 #define DEFAULT_CONFIG ETCDIR "/tws.conf"
 
+#include	<sys/time.h>
+
 #include	<glib.h>
 
 typedef enum {
@@ -45,7 +47,6 @@ typedef struct {
 typedef struct {
 	GPtrArray	*vhosts;
 	GPtrArray	*listeners;
-	int		 timeout;
 	char		*user;
 	char		*group;
 	int		 use_sendfile;
@@ -58,6 +59,7 @@ typedef struct {
 	GPtrArray	*compr_types;
 	int		 maxclients;
 	int		 nfiles;
+	struct timeval	 timeout;
 } tws_config_t;
 
 tws_config_t	*curconf;

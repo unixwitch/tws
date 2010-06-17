@@ -459,7 +459,7 @@ int	ret, one = 1;
 	}
 
 	event_set(&client->ev, client->fd, EV_READ, client_read, client);
-	event_add(&client->ev, NULL);
+	event_add(&client->ev, &curconf->timeout);
 
 	return;
 
@@ -482,10 +482,15 @@ request_t	*req = client->request;
 char		*line, *host, *conn;
 int		 ret;
 
+	if (what == EV_TIMEOUT) {
+		client_abort(client);
+		return;
+	}
+
 	ret = evbuffer_read(client->buffer, client->fd, READ_BUFSZ);
 	
 	if (ret == -1 && errno == EAGAIN) {
-		event_add(&client->ev, NULL);
+		event_add(&client->ev, &curconf->timeout);
 		return;
 	}
 
@@ -505,7 +510,7 @@ int		 ret;
 	 * request.  If not, keep going.
 	 */
 	if (evbuffer_find(client->buffer, (const u_char *) "\r\n\r\n", 4) == NULL) {
-		event_add(&client->ev, NULL);
+		event_add(&client->ev, &curconf->timeout);
 		return;
 	}
 
@@ -786,7 +791,7 @@ client_last_chunk_done(
 	client->request = request_new();
 
 	event_set(&client->ev, client->fd, EV_READ, client_read, client);
-	event_add(&client->ev, NULL);
+	event_add(&client->ev, &curconf->timeout);
 }
 
 static void
@@ -799,6 +804,11 @@ client_drain_ready(
 client_t	*client = arg;
 int		 ret;
 
+	if (what == EV_TIMEOUT) {
+		client_abort(client);
+		return;
+	}
+
 	while ((ret = evbuffer_write(client->wrbuf, client->fd)) > 0)
 		;
 
@@ -810,7 +820,7 @@ int		 ret;
 	if (ret == -1 && errno != EAGAIN)
 		client->drain_cb(client, errno);
 
-	event_add(&client->ev, NULL);
+	event_add(&client->ev, &curconf->timeout);
 }
 
 void

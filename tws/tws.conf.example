@@ -36,8 +36,8 @@ listen "0.0.0.0:80" {
 # causing a lot of DNS load.
 resolve-hostnames = no
 
-# Client read timeout
-timeout = 60
+# Client read/write timeout
+timeout = 120
 
 # The default content type.  If you don't set this, no Content-Type header will
 # be sent for unknown types.  This is normally what you want, but if you have a

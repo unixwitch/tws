@@ -302,7 +302,7 @@ char		*s;
 		goto err;
 
 	/* Set global options */
-	tcfg->timeout = cfg_getint(cfg, "timeout");
+	tcfg->timeout.tv_sec = cfg_getint(cfg, "timeout");
 	if ((s = cfg_getstr(cfg, "user")) != NULL)
 		tcfg->user = strdup(s);
 	if ((s = cfg_getstr(cfg, "group")) != NULL)
