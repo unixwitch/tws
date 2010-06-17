@@ -53,6 +53,11 @@ typedef enum {
 	M_HEAD,
 } http_method_t;
 
+typedef enum {
+	CGI_READ_HEADERS,
+	CGI_READ_BODY
+} cgi_state_t;
+
 typedef struct {
 	GHashTable		*headers;
 	char			*method_str;
@@ -80,6 +85,12 @@ typedef struct {
 	pid_t		 pid;
 	int		 fds[2];
 	struct event	 ev;
+	cgi_state_t	 cgi_state;
+
+	/* CGI headers read from the script */
+	char		*cgi_status;
+	GHashTable	*cgi_headers;
+	struct evbuffer	*cgi_buffer;
 } request_t;
 
 	request_t	*request_new(void);

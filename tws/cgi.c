@@ -15,6 +15,7 @@
 #include	"cgi.h"
 #include	"file.h"
 #include	"log.h"
+#include	"setup.h"
 
 static void cgi_read_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
@@ -135,6 +136,7 @@ char		 dirs[1024];
 request_t	*req = client->request;
 
 	req->fds[0] = req->fds[1] = -1;
+	req->cgi_state = CGI_READ_HEADERS;
 
 	if (pipe(req->fds) == -1) {
 		log_error("spawn_cgi: pipe: %s", strerror(errno));
@@ -195,6 +197,10 @@ request_t	*req = client->request;
 	g_ptr_array_free(envp, TRUE);
 	g_ptr_array_free(argv, TRUE);
 
+	if ((req->cgi_buffer = evbuffer_new()) == NULL)
+		outofmemory();
+	req->cgi_headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
+
 	event_set(&req->ev, req->fds[0], EV_READ,
 			cgi_read_callback, client);
 	event_add(&req->ev, NULL);
@@ -221,33 +227,120 @@ cgi_read_callback(
 	void	*arg
 )
 {
-char	buf[4096];
-ssize_t	i;
+char		 buf[4096];
+ssize_t		 i;
 client_t	*client = arg;
+char		*line;
+GHashTableIter	 iter;
+char		*header, *value;
+int		 ret;
 
-	i = read(client->request->fds[0], buf, sizeof (buf));
+	/*
+	 * If we're reading the body, just pass it through.
+	 */
+	if (client->request->cgi_state == CGI_READ_BODY) {
+		i = read(client->request->fds[0], buf, sizeof (buf));
 
-	if (i == 0) {
-		client_abort(client);
+		if (i == 0) {
+			client_abort(client);
+			return;
+		}
+
+		if (i == -1 && errno == EAGAIN) {
+			event_add(&client->request->ev, NULL);
+			return;
+		}
+
+		if (i == -1) {
+			log_error("%s: read: %s",
+					client->request->filename,
+					strerror(errno));
+			client_abort(client);
+			return;
+		}
+
+		evbuffer_add(client->wrbuf, buf, i);
+		client_drain(client, client_write_callback);
 		return;
 	}
 
-	if (i == -1 && errno == EAGAIN) {
+	/*
+	 * We're reading headers.  Buffer all headers until the empty line
+	 * signifying the start of the body.
+	 */
+	if ((ret = evbuffer_read(client->request->cgi_buffer,
+	    client->request->fds[0], READ_BUFSZ)) == -1) {
+		if (errno == EAGAIN) {
+			event_add(&client->request->ev, NULL);
+			return;
+		}
+
+		client_error(client, "CGI read: %s", strerror(errno));
+		client_send_error(client, 500);
+		return;
+	}
+
+	if (ret == 0) {
+		client_error(client, "EOF reading CGI response headers");
+		client_send_error(client, 500);
+		return;
+	}
+
+	/*
+	 * Keep reading if we haven't read the entire header yet
+	 */
+	if (evbuffer_find(client->request->cgi_buffer, "\n\n", 2) == NULL &&
+	    evbuffer_find(client->request->cgi_buffer, "\n\r\n", 3) == NULL) {
 		event_add(&client->request->ev, NULL);
 		return;
 	}
 
-	if (i == -1) {
-		log_error("%s: read: %s",
-				client->request->filename,
-				strerror(errno));
-		client_abort(client);
-		return;
+	while ((line = evbuffer_readline(client->request->cgi_buffer)) != NULL) {
+		if (!*line)
+			break;
+
+		header = line;
+		if ((value = strstr(line, ": ")) == NULL) {
+			client_error(client, "CGI read: invalid header: %s", header);
+			client_send_error(client, 500);
+			return;
+		}
+		*value++ = '\0';
+
+		g_hash_table_replace(client->request->cgi_headers,
+				header, value);
 	}
 
-	evbuffer_add(client->wrbuf, buf, i);
+	if ((client->request->cgi_status = g_hash_table_lookup(
+	    client->request->cgi_headers, "Status")) == NULL)
+		client->request->cgi_status = "200 OK";
+
+	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 %s\r\n",
+			client->request->cgi_status);
+
+	g_hash_table_iter_init(&iter, client->request->cgi_headers);
+	while (g_hash_table_iter_next(&iter, (gpointer *) &header, (gpointer *) &value))
+		evbuffer_add_printf(client->wrbuf, "%s: %s\r\n",
+			header, value);
+	if (g_hash_table_lookup(client->request->cgi_headers, "Server") == NULL)
+		evbuffer_add_printf(client->wrbuf, "Server: Toolserver-Web-Server/%s\r\n",
+				PACKAGE_VERSION);
+	if (g_hash_table_lookup(client->request->cgi_headers, "Date") == NULL) {
+	time_t		 now;
+	struct tm	*tm;
+	char		 tbuf[64];
+
+		time(&now);
+		tm = gmtime(&now);
+		strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
+		evbuffer_add_printf(client->wrbuf, "Date: %s\r\n", tbuf);
+	}
+	evbuffer_add_printf(client->wrbuf, "\r\n");
+	
+	client->request->cgi_state = CGI_READ_BODY;
 	client_drain(client, client_write_callback);
 }
+
 
 void
 client_write_callback(
