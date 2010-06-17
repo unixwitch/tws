@@ -415,7 +415,7 @@ request_t	*req = client->request;
 		return -1;
 
 	/* Read method */
-	req->method_str = strdup(line);
+	req->method_str = xstrdup(line);
 	if ((req->url = strchr(req->method_str, ' ')) == NULL) {
 		/* Invalid request */
 		client_abort(client);
