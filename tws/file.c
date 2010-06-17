@@ -445,8 +445,8 @@ dir_write_done(client_t *client, int error)
 	client_close(client);
 }
 
-void
-handle_directory(client_t *client)
+static void
+dir_start_write(client_t *client, int error)
 {
 GArray		*dirents = NULL;
 DIR		*dir = NULL;
@@ -455,7 +455,11 @@ char		 p[PATH_MAX];
 guint		 i, end;
 char		*escurl;
 
-	client_add_header(client, "Content-Type", "text/html");
+	if (error) {
+		client_error(client, "write: %s", strerror(errno));
+		client_abort(client);
+		return;
+	}
 
 	if ((dir = opendir(client->request->filename)) == NULL) {
 		client_error(client, "opendir: %s", strerror(errno));
@@ -466,6 +470,7 @@ char		*escurl;
 
 	escurl = htmlescape(client->request->url);
 	client_printf(client,
+"<!DOCTYPE html>"
 "<html>\n"
 "  <head>\n"
 "    <title>Index of %1$s</title>\n"
@@ -570,4 +575,15 @@ err:
 
 	if (dir)
 		closedir(dir);
+
+	client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
 }
+
+void
+handle_directory(client_t *client)
+{
+	client->request->resp_status = "200 OK";
+	client_add_header(client, "Content-Type", "text/html");
+	client_start_response(client, dir_start_write);
+}
+
