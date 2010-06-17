@@ -218,6 +218,10 @@ next:
 	strftime(tbuf, sizeof (tbuf), "%b, %d %a %Y %H:%M:%S GMT", tm);
 	evbuffer_add_printf(client->wrbuf, "Last-Modified: %s\r\n", tbuf);
 
+	if (req->version == HTTP_10 && req->keepalive)
+		evbuffer_add_printf(client->wrbuf,
+				"Connection: Keep-Alive\r\n");
+
 	if (req->mimetype)
 		evbuffer_add_printf(client->wrbuf,
 			"Content-Type: %s\r\n",

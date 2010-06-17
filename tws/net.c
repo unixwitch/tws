@@ -347,21 +347,27 @@ int		 ret;
 		*req->query++ = '\0';
 
 	/*
-	 * See if we should do keep-alive.  HTTP/1.1 only.
+	 * See if we should do keep-alive.
 	 */
-	if (req->version == HTTP_11) {
-		client->request->keepalive = 1;
+	/* Default to keep-alive in http/1.1 */
+	req->keepalive = req->version == HTTP_11;
 
-		if ((conn = g_hash_table_lookup(req->headers, "Connection")) != NULL) {
-		gchar	**opts, *opt;
-			opts = g_strsplit(conn, ", ", 0);
-			for (opt = *opts; *opt; ++opt)
-				if (!strcasecmp(opt, "close")) {
-					client->request->keepalive = 0;
-					break;
-				}
-			g_strfreev(opts);
+	if ((conn = g_hash_table_lookup(req->headers, "Connection")) != NULL) {
+	gchar	**opts, *opt;
+		opts = g_strsplit(conn, ", ", 0);
+		for (opt = *opts; *opt; ++opt) {
+			/* In HTTP/1.1, Connection: close disabled keep-alive.
+			 * In HTTP/1.0, Connection: Keep-Alive enables it.
+			 */
+			if (!strcasecmp(opt, "close")) {
+				req->keepalive = 0;
+				break;
+			} else if (!strcasecmp(opt, "Keep-Alive")) {
+				req->keepalive = 1;
+				break;
+			}
 		}
+		g_strfreev(opts);
 	}
 
 	assert(client->state == HANDLE_REQUEST);
