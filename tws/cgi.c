@@ -300,8 +300,8 @@ int		 ret;
 	/*
 	 * Keep reading if we haven't read the entire header yet
 	 */
-	if (evbuffer_find(client->request->cgi_buffer, "\n\n", 2) == NULL &&
-	    evbuffer_find(client->request->cgi_buffer, "\n\r\n", 3) == NULL) {
+	if (evbuffer_find(client->request->cgi_buffer, (const u_char *) "\n\n", 2) == NULL &&
+	    evbuffer_find(client->request->cgi_buffer, (const u_char *) "\n\r\n", 3) == NULL) {
 		event_add(&client->request->ev, NULL);
 		return;
 	}
