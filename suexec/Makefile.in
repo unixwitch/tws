@@ -40,7 +40,7 @@ clean:
 	rm -f $(OBJS) suexec
 
 depend:
-	sed -e '/# Do not remove this line -- make depend needs it/,$$ d' < Makefile > Makefile.new
+	sed -e '/^# Do not remove this line -- make depend needs it/,$$ d' < Makefile > Makefile.new
 	echo '# Do not remove this line -- make depend needs it' >> Makefile.new
 	$(CC) -MM $(CFLAGS) $(CPPFLAGS) @GLIB_CFLAGS@ @CONFUSE_CFLAGS@ $(OBJS:.o=.c) >> Makefile.new
 	mv Makefile.new Makefile
