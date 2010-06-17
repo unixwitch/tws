@@ -102,8 +102,15 @@ char		*ims;
 		 * path info for CGI requests.
 		 */
 		if (!S_ISDIR(sb.st_mode)) {
-			if (t != end)
+			if (t != end) {
+				/*
+				 * Request has pathinfo; store it in req and remove it
+				 * from urlname.
+				 */
 				req->pathinfo = xstrdup(req->filename + strlen(s));
+				*t = '\0';
+				req->urlname[strlen(req->urlname) - strlen(req->pathinfo)] = '\0';
+			}
 
 			free(req->filename);
 			req->filename = s;

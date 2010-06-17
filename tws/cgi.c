@@ -54,8 +54,6 @@ request_t	*req = client->request;
 	 * SERVER_ADMIN
 	 * SERVER_PORT
 	 * SERVER_SOFTWARE
-	 * REMOTE_HOST
-	 * REMOTE_ADDR
 	 */
 	add_env(env, "PATH", "/bin:/usr/bin:/usr/local/bin");
 	add_env(env, "GATEWAY_INTERFACE", "CGI/1.1");
@@ -68,6 +66,11 @@ request_t	*req = client->request;
 	add_env(env, "SCRIPT_NAME", req->url);
 	add_env(env, "DOCUMENT_ROOT", req->vhost->docroot);
 	add_env(env, "SERVER_NAME", req->vhost->name);
+	add_env(env, "REMOTE_HOST", client->ip);
+	add_env(env, "REMOTE_ADDR", client->ip);
+
+	if (req->pathinfo)
+		add_env(env, "PATH_INFO", req->pathinfo);
 
 	if (tz)
 		add_env(env, "TZ", tz);
