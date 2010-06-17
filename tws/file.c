@@ -101,7 +101,7 @@ char		*ims;
 			goto next;
 
 		if (stat(s, &sb) == -1) {
-			client_error(client, "%s", s, strerror(errno));
+			client_error(client, "%s", strerror(errno));
 
 			switch (errno) {
 			case EACCES:
