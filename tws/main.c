@@ -3,6 +3,8 @@
  * Use is subject to license terms.
  */
 
+#include	<sys/types.h>
+#include	<sys/resource.h>
 #include	<stdio.h>
 #include	<pwd.h>
 #include	<grp.h>
@@ -73,6 +75,14 @@ int		 c;
 	if (log_open() == -1) {
 		(void) fprintf(stderr, "cannot open log file\n");
 		return 1;
+	}
+
+	if (curconf->nfiles) {
+	struct rlimit	lim;
+		lim.rlim_cur = lim.rlim_max = curconf->nfiles;
+		if (setrlimit(RLIMIT_NOFILE, &lim) == -1)
+			log_warn("Cannot set nfiles: %d: %s",
+				curconf->nfiles, strerror(errno));
 	}
 
 	log_notice("TWS/%s starting up", PACKAGE_VERSION);
