@@ -258,7 +258,7 @@ int		 ret;
 				return;
 			}
 
-			evbuffer_add_printf(client->wrbuf, "0\r\n");
+			evbuffer_add_printf(client->wrbuf, "0\r\n\r\n");
 			client_drain(client, cgi_last_chunk_done);
 			return;
 		}
@@ -329,11 +329,13 @@ int		 ret;
 	}
 
 	if ((client->request->cgi_status = g_hash_table_lookup(
-	    client->request->cgi_headers, "Status")) == NULL)
-		client->request->cgi_status = "200 OK";
-	else
+	    client->request->cgi_headers, "Status")) != NULL) {
+		if (*client->request->cgi_status)
+			client->request->cgi_status++;
 		g_hash_table_remove(client->request->cgi_headers,
 				"Status");
+	} else
+		client->request->cgi_status = "200 OK";
 
 	evbuffer_add_printf(client->wrbuf, "HTTP/1.1 %s\r\n",
 			client->request->cgi_status);

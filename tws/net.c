@@ -937,6 +937,8 @@ client_write(
 	if (client->request->flags.write_chunked)
 		evbuffer_add_printf(client->wrbuf, "%lx\r\n", (long unsigned) bufsz);
 	evbuffer_add(client->wrbuf, buf, bufsz);
+	if (client->request->flags.write_chunked)
+		evbuffer_add(client->wrbuf, "\r\n", 2);
 }
 
 void
