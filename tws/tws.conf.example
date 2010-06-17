@@ -30,6 +30,11 @@ default-content-type = "text/plain"
 # Where to load the list of MIME types from
 mime-type-file = "/usr/local/etc/tws/mime.types"
 
+# Name of the index file(s) to look for if a request is made for a directory.
+index-file = {
+	"index.html"
+}
+
 # Any number of virtual hosts can be defined.  If none matches the client
 # request, _default_ will be served.  If _default_ is not defined, the client
 # will receive an error message.
@@ -117,4 +122,5 @@ virtualhost "_default_" {
 
 	# Some global options can be defined for virtual hosts as well
 	default-content-type = "text/plain"
+	index-file = { "index.html", "index.php" }
 }
