@@ -732,8 +732,11 @@ client_close(client_t *client)
 		} while (client->request->zstream->avail_out == 0);
 	}
 
-	if (client->request->flags.write_chunked) {
+	if (client->request->flags.write_chunked)
 		evbuffer_add(client->wrbuf, "0\r\n\r\n", 5);
+
+	if (client->request->flags.write_chunked ||
+	    client->request->zstream) {
 		client_drain(client, client_last_chunk_done);
 		return;
 	}
