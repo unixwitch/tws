@@ -135,7 +135,7 @@ char		 un[64];
 GPtrArray	*argv, *envp;
 char		 s[1024];
 guint		 i;
-const char	*dir;
+const char	*dir = NULL;
 char		 dirs[1024];
 request_t	*req = client->request;
 
@@ -152,7 +152,7 @@ request_t	*req = client->request;
 	envp = g_ptr_array_new_with_free_func(free);
 
 	/* Set up argv */
-	if (!req->vhost->suexec_enable) {
+	if (!req->vhost->suexec_enable || !req->userdir) {
 		g_ptr_array_add(argv, req->filename);
 		g_ptr_array_add(argv, NULL);
 	} else if (req->vhost->suexec_enable) {
@@ -221,7 +221,6 @@ err:
 	if (req->fds[1] != -1)
 		close(req->fds[1]);
 	client_send_error(client, 500);
-	free_request(req);
 }
 
 static void

@@ -54,12 +54,34 @@ char		*ims;
 
 	/*
 	 * Transform the filename into either a docroot or userdir request.
+	 * We also set 'urlname' here.  This is the part of the URL excluding
+	 * the leading /; and for userdir requests, excluding the leading
+	 * userdir prefix.  Example:
+	 *   /foo/bar/baz  -> foo/bar/baz
+	 *   /~foo/bar/baz -> bar/baz
+	 * The urlname is used later in suexec CGI processing.
 	 */
-	if ((req->filename = get_filename(req)) == NULL) {
-		client_send_error(client, 500);
-		return;
+	
+	if (req->vhost->userdir &&
+	    strncmp(req->url, req->vhost->userdir_prefix, strlen(req->vhost->userdir_prefix)) == 0 &&
+	    strlen(req->url) > strlen(req->vhost->userdir_prefix)) {
+	char	*s;
+		/* This is a userdir request */
+		if ((req->filename = get_userdir(req)) == NULL) {
+			client_send_error(client, HTTP_BAD_REQUEST);
+			return;
+		}
+		if ((s = index(req->url + strlen(req->vhost->userdir_prefix), '/')) != NULL)
+			req->urlname = xstrdup(s + 1);
+	} else {
+		if ((req->filename = get_filename(req)) == NULL) {
+			client_send_error(client, HTTP_BAD_REQUEST);
+			return;
+		}
+		req->urlname = xstrdup(req->url + 1);
 	}
 
+	printf("filename=[%s]\n", req->filename);
 	/*
 	 * Traverse the filename, and check each component of the path.  If
 	 * we end up at a file, the remainder of the URL is path info.
@@ -145,8 +167,9 @@ next:
 	 * Check if the MIME type forces this to be a CGI request.  If so,
 	 * pass it off to the CGI handler.
 	 */
-	if (g_hash_table_lookup_extended(req->vhost->cgitypes, req->mimetype, NULL, NULL))
-		iscgi = 1;
+	if (req->mimetype)
+		if (g_hash_table_lookup_extended(req->vhost->cgitypes, req->mimetype, NULL, NULL))
+			iscgi = 1;
 
 	if (iscgi) {
 		/* Our work here is done */
@@ -339,15 +362,8 @@ get_filename(request_t *req)
 {
 char	*fname;
 
-	if (req->vhost->userdir) {
-		if ((fname = get_userdir(req)) != NULL)
-			return fname;
-	}
-
 	fname = xmalloc(strlen(req->vhost->docroot) + 1 + strlen(req->url) + 1);
 	sprintf(fname, "%s/%s", req->vhost->docroot, req->url + 1);
-
-	req->urlname = strdup(req->url + 1);
 
 	return fname;
 }
@@ -377,13 +393,18 @@ char		*uname, *s, *fname;
 	}
 
 	fname = xmalloc(strlen(pwd->pw_dir) + 1 + 
-			strlen(req->vhost->userdir) + 1 + strlen(s) + 1);
+			strlen(req->vhost->userdir) + 1 +
+			(s ? strlen(s) : 0) + 1);
 
-	sprintf(fname, "%s/%s/%s",
-			pwd->pw_dir,
-			req->vhost->userdir,
-			s);
-	req->urlname = xstrdup(s);
+	if (s)
+		sprintf(fname, "%s/%s/%s",
+				pwd->pw_dir,
+				req->vhost->userdir,
+				s);
+	else
+		sprintf(fname, "%s/%s",
+				pwd->pw_dir,
+				req->vhost->userdir);
 
 	free(uname);
 	return fname;
