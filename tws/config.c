@@ -113,6 +113,8 @@ static cfg_opt_t opts[] = {
 	CFG_INT("compression-level", 6, CFGF_NONE),
 	CFG_STR_LIST("compress-types", "{}", CFGF_NONE),
 	CFG_BOOL("compress-cgi", 0, CFGF_NONE),
+	CFG_INT("max-clients", 10000, CFGF_NONE),
+	CFG_INT("nfiles", 0, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -133,9 +135,9 @@ tws_config_t	*cfg = NULL;
 	if ((cfg = calloc(1, sizeof(*cfg))) == NULL)
 		goto err;
 
-	if ((cfg->listeners = g_array_new(FALSE, FALSE, sizeof(tws_listen_t *))) == NULL)
+	if ((cfg->listeners = g_ptr_array_new()) == NULL)
 		goto err;
-	if ((cfg->vhosts = g_array_new(FALSE, FALSE, sizeof(vhost_t *))) == NULL)
+	if ((cfg->vhosts = g_ptr_array_new()) == NULL)
 		goto err;
 	return cfg;
 
@@ -315,6 +317,8 @@ char		*s;
 	tcfg->compr_level = cfg_getint(cfg, "compression-level");
 	tcfg->compr_cgi = cfg_getbool(cfg, "compress-cgi");
 	tcfg->compr_types = g_ptr_array_new_with_free_func(free);
+	tcfg->nfiles = cfg_getint(cfg, "nfiles");
+	tcfg->maxclients = cfg_getint(cfg, "max-clients");
 
 	for (i = 0, j = cfg_size(cfg, "compress-types"); i < j; i++)
 		g_ptr_array_add(
@@ -394,7 +398,7 @@ char		*s;
 	tws_listen_t	 *ls;
 		if ((ls = parse_listen(cfg_getnsec(cfg, "listen", i))) == NULL)
 			goto err;
-		g_array_append_val(tcfg->listeners, ls);
+		g_ptr_array_add(tcfg->listeners, ls);
 	}
 
 	/* Virtual host blocks */
@@ -402,7 +406,7 @@ char		*s;
 	vhost_t		*vh;
 		if ((vh = parse_vhost(cfg_getnsec(cfg, "virtualhost", i))) == NULL)
 			goto err;
-		g_array_append_val(tcfg->vhosts, vh);
+		g_ptr_array_add(tcfg->vhosts, vh);
 	}
 
 	return tcfg;
@@ -431,21 +435,21 @@ guint	i, j;
 	g_hash_table_destroy(cfg->mimetypes);
 
 	for (i = 0; i < cfg->vhosts->len; ++i) {
-	vhost_t	*vh = g_array_index(cfg->vhosts, vhost_t *, i);
+	vhost_t	*vh = g_ptr_array_index(cfg->vhosts, i);
 		free(vh->name);
 		free(vh->docroot);
 		free(vh->cgidirs);
 		free(vh->cgitypes);
 		g_ptr_array_free(vh->aliases, TRUE);
 	}
-	g_array_free(cfg->vhosts, TRUE);
+	g_ptr_array_free(cfg->vhosts, TRUE);
 
 	for (i = 0; i < cfg->listeners->len; ++i) {
-	tws_listen_t	*ls = g_array_index(cfg->vhosts, tws_listen_t *, i);
+	tws_listen_t	*ls = g_ptr_array_index(cfg->vhosts, i);
 		free(ls->addr);
 		free(ls->port);
 	}
-	g_array_free(cfg->listeners, TRUE);
+	g_ptr_array_free(cfg->listeners, TRUE);
 
 	free(cfg);
 }
@@ -457,7 +461,7 @@ config_find_vhost(
 {
 guint	i;
 	for (i = 0; i < curconf->vhosts->len; ++i) {
-	vhost_t	*vh = g_array_index(curconf->vhosts, vhost_t *, i);
+	vhost_t	*vh = g_ptr_array_index(curconf->vhosts, i);
 		if (!strcasecmp(name, vh->name))
 			return vh;
 	}

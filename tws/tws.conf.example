@@ -6,8 +6,20 @@
 user = "www"
 group = "www"
 
+# Set the open files limit at startup.  If TWS is started as root, this
+# can be set to any value up to the OS limit.  Otherwise, it can't be
+# raised above the hard limit.
+nfiles = 1024
+
+# Maximum number of clients that we can serve at once.  Setting this too
+# low will cause client requests to be delayed unnecessarily, while 
+# setting it too high will overload the system and cause resource
+# starvation.  
+max-clients = 10000
+
 # Use sendfile() to improve static file performance.  Only available on
-# FreeBSD.
+# FreeBSD.  Note: sendfile() performs poorly on FreeBSD (at least 8.0) when 
+# using a ZFS filesystem.  It should be disabled in that situation.
 use-sendfile = "yes"
 
 # IP address to listen on; can specify several.
@@ -20,8 +32,8 @@ listen "0.0.0.0:80" {
 }
 
 # Do reverse DNS lookups for clients.  This requires two DNS queries for
-# every request, and can significantly reduce perform in the event of
-# slow nameservers.
+# every request, and can significantly reduce performance, as well as
+# causing a lot of DNS load.
 resolve-hostnames = no
 
 # Client read timeout
@@ -38,6 +50,25 @@ mime-type-file = "/usr/local/etc/tws/mime.types"
 # Name of the index file(s) to look for if a request is made for a directory.
 index-file = {
 	"index.html"
+}
+
+# Whether to compress content for clients which can support it. This can 
+# significantly reduce bandwidth usage, but imposes some CPU overhead.  The 
+# compression level should be between 1 (lowest) and 9 (highest); 6, the 
+# default, is a reasonable compromise.  If you find TWS is using too much CPU, 
+# try lowering it.  Set to 0 to disable compression.
+compression-level = 6
+
+# Whether to compress the output from CGI scripts.  Note that if the
+# CGI script sends a Content-Encoding header, TWS will not compress
+# the output even if this is enabled.
+compress-cgi = yes
+
+# MIME types to compress.  Generally, text data compresses well, while
+# compressing image data is a waste of CPU.
+compress-types = {
+	"text/*",
+	"application/*+xml"
 }
 
 # Any number of virtual hosts can be defined.  If none matches the client

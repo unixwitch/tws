@@ -43,8 +43,8 @@ typedef struct {
 } tws_listen_t;
 
 typedef struct {
-	GArray		*vhosts;
-	GArray		*listeners;
+	GPtrArray	*vhosts;
+	GPtrArray	*listeners;
 	int		 timeout;
 	char		*user;
 	char		*group;
@@ -56,6 +56,8 @@ typedef struct {
 	int		 compr_level;
 	int		 compr_cgi;
 	GPtrArray	*compr_types;
+	int		 maxclients;
+	int		 nfiles;
 } tws_config_t;
 
 tws_config_t	*curconf;

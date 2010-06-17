@@ -32,6 +32,8 @@
 char current_time[64] = "Thu, 1 Jan 1970 00:00:00 GMT";
 char *server_version;
 
+static int nclients;
+
 static void accept_client(int, short, void *);
 static void client_start(client_t *);
 static void client_lookup(client_t *);
@@ -45,8 +47,10 @@ static void client_last_chunk_done(client_t *, int);
 static void error_done(client_t *, int);
 static void exit_signal(int, short, void *);
 static void update_time(int, short, void *);
+static void suspend_listeners(void);
+static void start_listeners(void);
 
-static GArray	*listeners;
+static GPtrArray	*listeners;
 
 typedef struct {
 	int		fd;
@@ -117,7 +121,7 @@ int		 one = 1;
 	event_priority_set(&l->ev, ACCEPT_PRIO);
 	event_add(&l->ev, NULL);
 
-	g_array_append_val(listeners, l);
+	g_ptr_array_add(listeners, l);
 	return 0;
 
 err:
@@ -158,7 +162,6 @@ int		 ret;
 	return 0;
 
 err:
-	g_array_free(listeners, TRUE);
 	return -1;
 }
 
@@ -189,11 +192,11 @@ struct timeval timeout = { 1, 0 };
 		goto err;
 	}
 
-	if ((listeners = g_array_new(FALSE, FALSE, sizeof(listener_t *))) == NULL)
+	if ((listeners = g_ptr_array_new()) == NULL)
 		goto err;
 
 	for (i = 0; i < curconf->listeners->len; ++i) {
-		if (setup_listener(g_array_index(curconf->listeners, tws_listen_t *, i)) == -1)
+		if (setup_listener(g_ptr_array_index(curconf->listeners, i)) == -1)
 			goto err;
 	}
 
@@ -209,6 +212,8 @@ struct timeval timeout = { 1, 0 };
 	return 0;
 
 err:
+	if (listeners)
+		g_ptr_array_free(listeners, TRUE);
 	return -1;
 }
 
@@ -293,6 +298,10 @@ socklen_t		addrlen = sizeof(addr);
 		client_error(client, "accept_client: getnameinfo: %s\n", gai_strerror(ret));
 		goto err;
 	}
+
+	nclients++;
+	if (nclients == curconf->maxclients)
+		suspend_listeners();
 
 	if (curconf->dodns)
 		client_lookup(client);
@@ -698,6 +707,10 @@ client_abort(client_t *client)
 	evbuffer_free(client->wrbuf);
 
 	free(client);
+
+	if (nclients == curconf->maxclients)
+		start_listeners();
+	nclients--;
 }
 
 void
@@ -1228,4 +1241,20 @@ client_add_header(
 {
 	g_hash_table_replace(client->request->resp_headers,
 			xstrdup(header), xstrdup(value));
+}
+
+static void
+suspend_listeners()
+{
+guint	i;
+	for (i = 0; i < listeners->len; i++)
+		event_del(&((listener_t *) g_ptr_array_index(listeners, i))->ev);
+}
+
+static void
+start_listeners()
+{
+guint	i;
+	for (i = 0; i < listeners->len; i++)
+		event_add(&((listener_t *) g_ptr_array_index(listeners, i))->ev, NULL);
 }
