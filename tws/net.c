@@ -783,14 +783,18 @@ client_drain_ready(
 client_t	*client = arg;
 int		 ret;
 
-	if ((ret = evbuffer_write(client->wrbuf, client->fd)) > 0) {
-		event_del(&client->ev);
+	while ((ret = evbuffer_write(client->wrbuf, client->fd)) > 0)
+		;
+
+	if (ret == 0) {
 		client->drain_cb(client, 0);
 		return;
 	}
 
 	if (ret == -1 && errno != EAGAIN)
 		client->drain_cb(client, errno);
+
+	event_add(&client->ev, NULL);
 }
 
 void
@@ -804,10 +808,9 @@ client_drain(
 
 	event_set(&client->ev, client->fd, EV_WRITE,
 			client_drain_ready, client);
-	event_add(&client->ev, NULL);
 	client->drain_cb = cb;
 
-/*	client_drain_ready(client->fd, EV_WRITE, client);*/
+	client_drain_ready(client->fd, EV_WRITE, client);
 }
 
 void
