@@ -102,7 +102,7 @@ char		*ims;
 		 * path info for CGI requests.
 		 */
 		if (!S_ISDIR(sb.st_mode)) {
-			if (t != end) {
+			if (t && t != end) {
 				/*
 				 * Request has pathinfo; store it in req and remove it
 				 * from urlname.
