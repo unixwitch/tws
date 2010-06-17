@@ -368,7 +368,8 @@ char		*uname, *s, *fname;
 		return NULL;
 	}
 
-	fname = xmalloc(strlen(pwd->pw_dir) + 1 + strlen(s) + 1);
+	fname = xmalloc(strlen(pwd->pw_dir) + 1 + 
+			strlen(req->vhost->userdir) + 1 + strlen(s) + 1);
 
 	sprintf(fname, "%s/%s/%s",
 			pwd->pw_dir,
