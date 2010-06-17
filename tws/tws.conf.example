@@ -80,13 +80,19 @@ virtualhost "_default_" {
 	}
 
 	# Force a CGI program to be executed with a particular interpreter.  
-	# This is mostly useful for PHP.
+	# This is mostly useful for PHP.  
+	#
+	# NOTE: To use the PHP CGI executable as an interpreter, you must set 
+	# cgi.force_redirect=0 in php.ini.  If you do that, it is no longer 
+	# safe to place the PHP CGI in the document root.  See 
+	# <http://uk2.php.net/manual/en/security.cgi-bin.attacks.php> for more 
+	# information.
 	interpreter "/usr/local/bin/php-cgi" {
 		mime-types = {
 			"application/x-php"
 		}
 
-		# Use FastCGI for the interpreter.  Note: for PHP, make sure
+		# Use FastCGI for the interpreter.  For PHP, make sure
 		# PHP was built with FastCGI enabled.
 		protocol = fastcgi
 	}

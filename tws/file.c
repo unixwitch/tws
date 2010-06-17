@@ -169,7 +169,7 @@ next:
 	 * pass it off to the CGI handler.
 	 */
 	if (req->mimetype)
-		if (g_hash_table_lookup(req->vhost->cgitypes, req->mimetype))
+		if (g_hash_table_lookup_extended(req->vhost->cgitypes, req->mimetype, NULL, NULL))
 			iscgi = 1;
 		else if (g_hash_table_lookup(req->vhost->interps, req->mimetype))
 			iscgi = 1;

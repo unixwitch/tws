@@ -176,9 +176,11 @@ interp_t	*ip;
 		snprintf(un, sizeof (un), "%s%s",
 			req->flags.userdir ? "~" : "", req->username);
 
-		g_ptr_array_add(argv, SUEXEC);
-		g_ptr_array_add(argv, un);
+		g_ptr_array_add(argv, execname ? SUEXEC_WEAK : SUEXEC);
+		g_ptr_array_add(argv, execname ? req->username : un);
 		g_ptr_array_add(argv, gid);
+		if (execname)
+			g_ptr_array_add(argv, execname);
 		g_ptr_array_add(argv, req->urlname);
 		g_ptr_array_add(argv, NULL);
 
