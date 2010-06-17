@@ -140,6 +140,8 @@ guint		 i;
 const char	*dir = NULL;
 char		 dirs[1024];
 request_t	*req = client->request;
+char		*execname = NULL;
+interp_t	*ip;
 
 	req->cgi_state = CGI_READ_HEADERS;
 
@@ -148,12 +150,18 @@ request_t	*req = client->request;
 		goto err;
 	}
 
-	argv = g_ptr_array_new();
+	/* See if this is an interpreter request */
+	if ((ip = g_hash_table_lookup(req->vhost->interps, req->mimetype)) != NULL)
+		execname = ip->path;
 
+	argv = g_ptr_array_new();
 	envp = g_ptr_array_new_with_free_func(free);
 
 	/* Set up argv */
 	if (!req->vhost->suexec_enable || !req->flags.userdir) {
+		if (execname)
+			g_ptr_array_add(argv, execname);
+
 		g_ptr_array_add(argv, req->filename);
 		g_ptr_array_add(argv, NULL);
 	} else if (req->vhost->suexec_enable) {
@@ -337,6 +345,8 @@ int		 ret;
 	
 	client->request->cgi_state = CGI_READ_BODY;
 	client_start_response(client, client_write_callback);
+
+	evbuffer_add_buffer(client->wrbuf, client->request->cgi_buffer);
 }
 
 

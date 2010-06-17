@@ -17,7 +17,6 @@ typedef enum {
 
 typedef struct {
 	char		*path;
-	GHashTable	*types;
 	interp_proto_t	 protocol;
 } interp_t;
 
@@ -28,7 +27,7 @@ typedef struct {
 	char		*userdir_prefix;
 	char		*deftype;
 	GPtrArray	*aliases;
-	GPtrArray	*interps;
+	GHashTable	*interps;
 	GPtrArray	*indexes;
 	GHashTable	*cgidirs;
 	GHashTable	*cgitypes;

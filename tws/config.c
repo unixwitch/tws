@@ -231,23 +231,27 @@ int		 i, j;
 		}
 	}
 
+	vh->interps = g_hash_table_new_full(
+		g_str_hash, g_str_equal, free, free);
+
 	for (i = 0, j = cfg_size(cfg, "interpreter"); i < j; ++i) {
 	cfg_t		*ipc = cfg_getnsec(cfg, "interpreter", i);
-	interp_t	*ip;
 	int		 i, end;
-		ip = xcalloc(1, sizeof(*ip));
-		ip->path = xstrdup(cfg_title(ipc));
-		ip->protocol = cfg_getint(ipc, "protocol");
-		ip->types = g_hash_table_new_full(
-			g_str_hash, g_str_equal, free, NULL);
 
 		for (i = 0, end = cfg_size(ipc, "mime-types"); i < end; i++) {
-			g_hash_table_replace(
-				ip->types,
-				xstrdup(cfg_getnstr(ipc, "mime-types", i)),
-				NULL);
-		}
+		interp_t	*ip;
+		const char	*path;
 
+			path = cfg_title(ipc);
+			ip = xcalloc(1, sizeof(*ip) + strlen(path) + 1);
+			ip->path = (char *) ip + sizeof(*ip);
+			strcpy(ip->path, path);
+
+			g_hash_table_replace(
+				vh->interps,
+				xstrdup(cfg_getnstr(ipc, "mime-types", i)),
+				ip);
+		}
 	}
 	
 	if ((scfg = cfg_getsec(cfg, "suexec")) != NULL) {
