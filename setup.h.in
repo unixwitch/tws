@@ -6,8 +6,14 @@
 /* Define to 1 if you have the `event' library (-levent). */
 #undef HAVE_LIBEVENT
 
+/* Define to 1 if you have the `z' library (-lz). */
+#undef HAVE_LIBZ
+
 /* Define to 1 if you have the <memory.h> header file. */
 #undef HAVE_MEMORY_H
+
+/* Define to 1 if you have the `setproctitle' function. */
+#undef HAVE_SETPROCTITLE
 
 /* Define to 1 if you have the <stdint.h> header file. */
 #undef HAVE_STDINT_H
@@ -47,9 +53,3 @@
 
 /* Define to 1 if you have the ANSI C header files. */
 #undef STDC_HEADERS
-
-/* Define to enable suexec */
-#undef SUEXEC
-
-/* Define to enable weak suexec */
-#undef SUEXEC_WEAK

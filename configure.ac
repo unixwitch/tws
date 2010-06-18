@@ -9,6 +9,8 @@ AC_PROG_INSTALL
 PKG_CHECK_MODULES([GLIB], [glib-2.0])
 PKG_CHECK_MODULES([CONFUSE], [libconfuse])
 
+AC_CHECK_FUNCS(setproctitle)
+
 libevent_include=""
 libevent_lib=""
 AC_ARG_WITH(libevent,
