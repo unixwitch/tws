@@ -97,6 +97,53 @@ AC_CHECK_LIB(z, gzopen, [], [
 	exit 1
 ],)
 
+openssl_include=""
+openssl_lib=""
+AC_ARG_WITH(openssl,
+	AC_HELP_STRING([--with-openssl=PATH],[base directory for OpenSSL]),
+	[
+		if test "x$withval" != "no"; then
+			openssl_include="$withval/include"
+			openssl_lib="$withval/lib"
+		fi
+	])
+
+AC_ARG_WITH([openssl-include],
+	AC_HELP_STRING([--with-openssl-include=PATH],[include directory for OpenSSL]),
+	[
+		if test "x$withval" != "no"; then
+			openssl_include="$withval"
+		fi
+	])
+
+AC_ARG_WITH([openssl-lib],
+	AC_HELP_STRING([--with-openssl-lib=PATH],[library directory for OpenSSL]),
+	[
+		if test "x$withval" != "no"; then
+			openssl_include="$withval"
+		fi
+	])
+
+if test "x$openssl_include" != "x"; then
+	CPPFLAGS="$CPPFLAGS -I$openssl_include"
+fi
+if test "x$openssl_lib" != "x"; then
+	LDFLAGS="$LDFLAGS -L$openssl_lib"
+fi
+
+AC_CHECK_HEADER(openssl/crypto.h, [], [
+	AC_MSG_ERROR([OpenSSL is required to build TWS])
+	exit 1
+],)
+AC_CHECK_LIB(crypto, SSLeay_version, [], [
+	AC_MSG_ERROR([OpenSSL is required to build TWS])
+	exit 1
+],)
+AC_CHECK_LIB(ssl, SSL_library_init, [], [
+	AC_MSG_ERROR([OpenSSL is required to build TWS])
+	exit 1
+],)
+
 suexec_user="www"
 suexec_minuid="100"
 suexec_mingid="100"

@@ -43,6 +43,20 @@ listen "0.0.0.0:80" {
 	protocol = ipv4
 }
 
+# An SSL listener.
+listen "ilythia.tcx.org.uk:443" {
+	ssl = yes
+
+	# Certificate file
+	certificate = "/usr/local/etc/tws/ssl/cert.pem"
+
+	# Private key
+	key = "/usr/local/etc/tws/ssl/key.pem";
+
+	# Ciphers to allow or disallow
+	ciphers = "ALL:+HIGH:+MEDIUM:!EXP:!ADH:!LOW:!NULL"
+}
+
 # Do reverse DNS lookups for clients.  This requires two DNS queries for
 # every request, and can significantly reduce performance, as well as
 # causing a lot of DNS load.

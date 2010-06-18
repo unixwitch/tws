@@ -10,6 +10,8 @@ server designed for multi-user web hosting systems.
 TWS has the following features:
 
 - Static file serving
+- SSL
+- zlib/gzip response compression
 - CGI execution by MIME type or directory
 - suexec (setuid) CGI execution
 
@@ -19,8 +21,6 @@ The following features are planned:
 - .htaccess support
 - ZWS-compatible per-user rewrite scripts
 - HTTP reverse proxy (Gateway)
-- SSL support
-- zlib/gzip response compression
 
 The following notable features are *not* planned:
 
@@ -36,6 +36,7 @@ The following software is required to build:
 - Glib (http://www.gtk.org/download.html)
 - libevent (http://monkey.org/~provos/libevent/)
 - libconfuse (http://www.nongnu.org/confuse/)
+- OpenSSL (http://www.openssl.org)
 
 To build:
 

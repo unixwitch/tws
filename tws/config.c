@@ -101,6 +101,10 @@ static cfg_opt_t vhost_opts[] = {
 static cfg_opt_t listen_opts[] = {
 	CFG_INT("backlog", 64, CFGF_NONE),
 	CFG_INT_CB("protocol", 0, CFGF_NONE, &verify_protocol),
+	CFG_STR("certificate", 0, CFGF_NONE),
+	CFG_STR("key", 0, CFGF_NONE),
+	CFG_BOOL("ssl", 0, CFGF_NONE),
+	CFG_STR("ciphers", 0, CFGF_NONE),
 	CFG_END()
 };
 
@@ -154,6 +158,7 @@ parse_listen(cfg)
 	cfg_t	*cfg;
 {
 tws_listen_t	*ls = NULL;
+char		*s;
 
 	ls = xcalloc(1, sizeof (*ls));
 	ls->addr = xstrdup(cfg_title(cfg));
@@ -163,6 +168,20 @@ tws_listen_t	*ls = NULL;
 
 	ls->backlog = cfg_getint(cfg, "backlog");
 	ls->protocol = cfg_getint(cfg, "protocol");
+	ls->ssl = cfg_getbool(cfg, "ssl");
+
+	if ((s = cfg_getstr(cfg, "certificate")) != NULL)
+		ls->ssl_cert = xstrdup(s);
+	if ((s = cfg_getstr(cfg, "key")) != NULL)
+		ls->ssl_key = xstrdup(s);
+	if ((s = cfg_getstr(cfg, "ciphers")) != NULL)
+		ls->ssl_ciphers = xstrdup(s);
+
+	if (ls->ssl && (!ls->ssl_cert || !ls->ssl_key)) {
+		cfg_error(cfg, "Certificate and private key must be specified "
+				"for SSL listeners");
+		return NULL;
+	}
 
 	return ls;
 }

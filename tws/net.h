@@ -12,6 +12,7 @@
 #include	<event.h>
 #include	<glib.h>
 #include	<zlib.h>
+#include	<openssl/ssl.h>
 
 #include	"config.h"
 
@@ -174,6 +175,13 @@ typedef struct client {
 	struct evbuffer		*buffer;
 	struct evbuffer		*wrbuf;
 	int			 fd;
+
+	SSL			*ssl;
+	struct event		 ssl_ev;
+	void (*ssl_read_cb)	(int, short, void *);
+	void (*ssl_write_cb)	(int, short, void *);
+	char			 sslbuf[1024];
+	int			 sslbufsz;
 
 	client_state_t		 state;
 	request_t		*request;

@@ -95,6 +95,52 @@ char		*h;
 		add_env(env, hdr, value);
 	}
 
+	/*
+	 * Missing:
+	 *
+	 * SSL_CIPHER_EXPORT
+	 */
+	if (client->ssl) {
+	SSL_SESSION	*sess;
+	char		 buf[SSL_MAX_SSL_SESSION_ID_LENGTH * 2 + 1] = { 0 };
+	int		 i;
+	X509		*cert;
+	long unsigned	 serial;
+
+		sess = SSL_get_session(client->ssl);
+		for (i = 0; i < sess->session_id_length; ++i) {
+			buf[i*2] = "0123456789ABCDEF"[sess->session_id[i] & 0xF];
+			buf[i*2 + 1] = "01234567890ABCDEF"[(sess->session_id[i] & 0xF0) >> 4];
+		}
+
+		add_env(env, "HTTPS", "ON");
+		add_env(env, "SSL_PROTOCOL", SSL_get_version(client->ssl));
+		add_env(env, "SSL_SESSION_ID", buf);
+		add_env(env, "SSL_CIPHER", SSL_get_cipher(client->ssl));
+
+		snprintf(buf, sizeof (buf), "%d", SSL_get_cipher_bits(client->ssl, &i));
+		add_env(env, "SSL_CIPHER_USEKEYSIZE", buf);
+		snprintf(buf, sizeof (buf), "%d", i);
+		add_env(env, "SSL_CIPHER_ALGKEYSIZE", buf);
+		add_env(env, "SSL_VERSION_INTERFACE", server_version);
+		add_env(env, "SSL_VERSION_LIBRARY", SSLeay_version(SSLEAY_VERSION));
+
+		cert = SSL_get_certificate(client->ssl);
+		snprintf(buf, sizeof (buf), "%ld", X509_get_version(cert));
+		add_env(env, "SSL_SERVER_M_VERSION", buf);
+		serial = ASN1_INTEGER_get(X509_get_serialNumber(cert));
+		snprintf(buf, sizeof (buf), "%lx:%lx:%lx:%lx:%lx:%lx:%lx:%lx",
+				(serial >> 56) & 0xFF,
+				(serial >> 48) & 0xFF,
+				(serial >> 40) & 0xFF,
+				(serial >> 32) & 0xFF,
+				(serial >> 24) & 0xFF,
+				(serial >> 16) & 0xFF,
+				(serial >> 8) & 0xFF,
+				serial & 0xFF);
+		add_env(env, "SSL_SERVER_M_SERIAL", buf);
+	}
+	
 	if (req->post_length) {
 	char	len[64];
 		snprintf(len, sizeof (len), "%d", (int) req->post_length);

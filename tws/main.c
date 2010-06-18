@@ -24,12 +24,13 @@ static void
 usage() 
 {
 	fprintf(stderr,
-"Usage: tws [-fh] [-c <config>]\n"
+"Usage: tws [-fhv] [-c <config>]\n"
 "\n"
 "    -h             Display this text\n"
 "    -f             Run in foreground\n"
 "    -c <config>    Use a different configuration file\n"
 "                   (default: %s)\n"
+"    -v             Display software version and exit\n"
 , DEFAULT_CONFIG);
 }
 
@@ -46,9 +47,12 @@ int		 i;
 	(void) argc;
 	(void) argv;
 
+	server_version = g_strdup_printf("Toolserver-Web-Server/%s",
+			PACKAGE_VERSION);
+
 	net_init();
 
-	while ((c = getopt(argc, argv, "c:fh")) != -1) {
+	while ((c = getopt(argc, argv, "c:fhv")) != -1) {
 		switch (c) {
 		case 'c':
 			config = optarg;
@@ -60,6 +64,17 @@ int		 i;
 
 		case 'h':
 			usage();
+			return 0;
+
+		case 'v':
+			printf("%s\n", server_version);
+			printf("Using libevent %s, %s, zlib %s, Glib %d.%d.%d\n",
+				event_get_version(),
+				SSLeay_version(SSLEAY_VERSION),
+				zlibVersion(),
+				glib_major_version,
+				glib_minor_version,
+				glib_micro_version);
 			return 0;
 
 		default:

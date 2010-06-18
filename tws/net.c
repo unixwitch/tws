@@ -22,6 +22,8 @@
 #include	<event.h>
 #include	<evdns.h>
 #include	<zlib.h>
+#include	<openssl/err.h>
+#include	<openssl/ssl.h>
 
 #include	"net.h"
 #include	"config.h"
@@ -56,8 +58,9 @@ static void suspend_listeners(void);
 static void start_listeners(void);
 
 typedef struct {
-	int		fd;
-	struct event	ev;
+	int		 fd;
+	struct event	 ev;
+	SSL_CTX		*ssl_ctx;
 } listener_t;
 
 static int
@@ -84,6 +87,39 @@ struct accept_filter_arg afa;
 	if (ret != 0) {
 		log_error("%s:%s: getnameinfo: %s\n", conf->addr, conf->port, gai_strerror(ret));
 		goto err;
+	}
+
+	if (conf->ssl) {
+		if ((l->ssl_ctx = SSL_CTX_new(SSLv23_server_method())) == NULL) {
+			log_error("%s[%s]:%s: Cannot create SSL context: %s",
+					conf->addr, nbuf, conf->port,
+					ERR_error_string(ERR_get_error(), NULL));
+			goto err;
+		}
+
+		if ((ret = SSL_CTX_use_certificate_file(l->ssl_ctx,
+				conf->ssl_cert, SSL_FILETYPE_PEM)) != 1) {
+			log_error("%s[%s]:%s: Cannot load SSL certificate: %s: %s",
+					conf->addr, nbuf, conf->port, conf->ssl_cert,
+					ERR_error_string(ERR_get_error(), NULL));
+			goto err;
+		}
+
+		if ((ret = SSL_CTX_use_PrivateKey_file(l->ssl_ctx,
+				conf->ssl_key, SSL_FILETYPE_PEM)) != 1) {
+			log_error("%s[%s]:%s: Cannot load SSL private key: %s: %s",
+					conf->addr, nbuf, conf->port, conf->ssl_key,
+					ERR_error_string(ERR_get_error(), NULL));
+			goto err;
+		}
+
+		if (conf->ssl_ciphers) {
+			if (SSL_CTX_set_cipher_list(l->ssl_ctx, conf->ssl_ciphers) == 0) {
+				log_error("%s[%s]:%s: No valid ciphers",
+					conf->addr, nbuf, conf->port);
+				goto err;
+			}
+		}
 	}
 
 	if ((l->fd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol)) == -1) {
@@ -175,17 +211,18 @@ static struct event ev_sigint;
 static struct event ev_sigterm;
 struct timeval timeout = { 1, 0 };
 
-	server_version = g_strdup_printf("Toolserver-Web-Server/%s",
-			PACKAGE_VERSION);
+	SSL_load_error_strings();
+	SSL_library_init();
 
 	if ((default_base = event_init()) == NULL) {
 		log_error("event_init: %s", strerror(errno));
 		goto err;
 	}
 
-	log_notice("Using libevent %s [%s], zlib %s, Glib %d.%d.%d",
+	log_notice("Using libevent %s [%s], %s, zlib %s, Glib %d.%d.%d",
 			event_get_version(),
 			event_get_method(),
+			SSLeay_version(SSLEAY_VERSION),
 			zlibVersion(),
 			glib_major_version,
 			glib_minor_version,
@@ -286,7 +323,7 @@ accept_client(
 	void	*arg
 )
 {
-int		 cfd = -1, ret;
+int		 cfd = -1, ret, one = 1;
 listener_t	*l = arg;
 client_t	 *client = NULL;
 
@@ -323,6 +360,26 @@ socklen_t		addrlen = sizeof(addr);
 			NI_NUMERICHOST);
 	if (ret != 0) {
 		client_error(client, "accept_client: getnameinfo: %s\n", gai_strerror(ret));
+		goto err;
+	}
+
+	if (l->ssl_ctx) {
+		if ((client->ssl = SSL_new(l->ssl_ctx)) == NULL) {
+			client_error(client, "SSL_new: %s",
+					ERR_error_string(ERR_get_error(), NULL));
+			goto err;
+		}
+
+		if (SSL_set_fd(client->ssl, client->fd) != 1) {
+			client_error(client, "SSL_set_fd: %s",
+					ERR_error_string(ERR_get_error(), NULL));
+			goto err;
+		}
+	}
+
+	if (setsockopt(cfd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
+		client_error(client, "setsockopt(TCP_NODELAY): %s",
+				strerror(errno));
 		goto err;
 	}
 
@@ -474,18 +531,42 @@ client_t	*client = arg;
 	}
 }
 
+/* Used for SSL */
+void
+client_restart(int fd, short what, void *arg)
+{
+	client_start(arg);
+}
+
 void
 client_start(client_t *client)
 {
-int	ret, one = 1;
-
-	if (setsockopt(client->fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one)) == -1) {
-		client_error(client, "setsockopt(TCP_NODELAY): %s",
-				strerror(errno));
-		goto err;
-	}
+int	ret;
 
 	event_set(&client->ev, client->fd, EV_READ, client_read, client);
+
+	if (client->ssl) {
+		if ((ret = SSL_accept(client->ssl)) != 1) {
+			switch (SSL_get_error(client->ssl, ret)) {
+			case SSL_ERROR_WANT_READ:
+				event_set(&client->ev, client->fd,
+					EV_READ, client_restart, client);
+				event_add(&client->ev, &curconf->timeout);
+				return;
+			case SSL_ERROR_WANT_WRITE:
+				event_set(&client->ev, client->fd,
+					EV_WRITE, client_restart, client);
+				event_add(&client->ev, &curconf->timeout);
+				return;
+			default:
+				client_error(client, "SSL_accept: %s",
+					ERR_error_string(ERR_get_error(), NULL));
+				client_abort(client);
+				return;
+			}
+		}
+	}
+
 	event_add(&client->ev, &curconf->timeout);
 
 	return;
@@ -509,34 +590,81 @@ request_t	*req = client->request;
 char		*line, *host, *conn;
 int		 ret;
 
+	event_set(&client->ev, client->fd, EV_READ, client_read, client);
+
 	if (what == EV_TIMEOUT) {
 		client_abort(client);
 		return;
 	}
 
-	ret = evbuffer_read(client->buffer, client->fd, READ_BUFSZ);
+	if (client->ssl) {
+	char	buf[READ_BUFSZ];
+	int	ret, err;
+		ret = SSL_read(client->ssl, buf, sizeof (buf));
+
+		if (ret == 0) {
+			switch (SSL_get_error(client->ssl, ret)) {
+			case SSL_ERROR_WANT_READ:
+				event_set(&client->ev, client->fd, EV_READ, client_read, client);
+				event_add(&client->ev, &curconf->timeout);
+				return;
+			case SSL_ERROR_WANT_WRITE:
+				event_set(&client->ev, client->fd, EV_WRITE, client_read, client);
+				event_add(&client->ev, &curconf->timeout);
+				return;
+			case SSL_ERROR_ZERO_RETURN:
+				SSL_free(client->ssl);
+				client->ssl = NULL;
+				client_abort(client);
+				return;
+			default:
+				if (SSL_get_shutdown(client->ssl) & SSL_RECEIVED_SHUTDOWN) {
+					client_abort(client);
+					return;
+				}
+
+				if (ERR_get_error() != 0)
+					client_error(client, "SSL_read: %s",
+						ERR_error_string(ERR_get_error(), NULL));
+				client_abort(client);
+				return;
+			}
+		}
+
+		if (ret < 0) {
+			client_error(client, "SSL_read: %s",
+					ERR_error_string(ERR_get_error(), NULL));
+			client_abort(client);
+			return;
+		}
+
+		evbuffer_add(client->buffer, buf, ret);
+	} else {
+		ret = evbuffer_read(client->buffer, client->fd, READ_BUFSZ);
 	
-	if (ret == -1 && errno == EAGAIN) {
-		event_add(&client->ev, &curconf->timeout);
-		return;
-	}
+		if (ret == -1 && errno == EAGAIN) {
+			event_add(&client->ev, &curconf->timeout);
+			return;
+		}
 
-	if (ret == -1) {
-		client_error(client, "read error: %s", strerror(errno));
-		client_abort(client);
-		return;
-	}
+		if (ret == -1) {
+			client_error(client, "read error: %s", strerror(errno));
+			client_abort(client);
+			return;
+		}
 
-	if (ret == 0) {
-		client_abort(client);
-		return;
+		if (ret == 0) {
+			client_abort(client);
+			return;
+		}
 	}
 
 	/*
 	 * If there's a \r\n\r\n in the buffer, we've read the entire
 	 * request.  If not, keep going.
 	 */
-	if (evbuffer_find(client->buffer, (const u_char *) "\r\n\r\n", 4) == NULL) {
+	if (evbuffer_find(client->buffer, (const u_char *) "\r\n\r\n", 4) == NULL &&
+	    evbuffer_find(client->buffer, (const u_char *) "\n\n", 2) == NULL) {
 		event_add(&client->ev, &curconf->timeout);
 		return;
 	}
@@ -727,10 +855,54 @@ request_t	*req = client->request;
 	return 0;
 }
 
+static void
+client_reabort(
+	int	fd,
+	short	what,
+	void	*arg
+)
+{
+	client_abort(arg);
+}
+
 void
 client_abort(client_t *client)
 {
 	assert(client);
+
+	if (client->ssl) {
+	int	ret;
+		for (;;) {
+			ret = SSL_shutdown(client->ssl);
+
+			if (ret == 1) {
+				SSL_free(client->ssl);
+				client->ssl = NULL;
+				break;
+			}
+
+			if (ret == 0)
+				break; /*continue;*/
+
+			if (ret < -1) {
+				switch (SSL_get_error(client->ssl, ret)) {
+				case SSL_ERROR_WANT_READ:
+					event_set(&client->ev, client->fd, EV_READ, client_reabort, client);
+					event_add(&client->ev, NULL);
+					return;
+				case SSL_ERROR_WANT_WRITE:
+					event_set(&client->ev, client->fd, EV_WRITE, client_reabort, client);
+					event_add(&client->ev, NULL);
+					return;
+				default:
+					client_error(client, "SSL_shutdown: %s",
+							ERR_error_string(ERR_get_error(), NULL));
+					client_abort(client);
+					return;
+				}
+			}
+		}
+	}
 
 	close(client->fd);
 
@@ -836,16 +1008,57 @@ int		 ret;
 		return;
 	}
 
-	while ((ret = evbuffer_write(client->wrbuf, client->fd)) > 0)
-		;
+	if (client->ssl) {
+	int	ret;
 
-	if (ret == 0) {
-		client->drain_cb(client, 0);
-		return;
+		if (client->sslbufsz == 0)
+			if ((client->sslbufsz = evbuffer_remove(client->wrbuf,
+						client->sslbuf,
+						sizeof (client->sslbuf))) == 0) {
+				client->drain_cb(client, 0);
+				return;
+			}
+
+		ret = SSL_write(client->ssl, client->sslbuf, client->sslbufsz);
+
+		if (ret == 0) {
+			switch (SSL_get_error(client->ssl, ret)) {
+			case SSL_ERROR_WANT_READ:
+				event_set(&client->ev, client->fd, EV_READ, client_read, client);
+				event_add(&client->ev, NULL);
+				return;
+			case SSL_ERROR_WANT_WRITE:
+				event_set(&client->ev, client->fd, EV_WRITE, client_read, client);
+				event_add(&client->ev, NULL);
+				return;
+			default:
+				client_error(client, "SSL_write: %s",
+						ERR_error_string(ERR_get_error(), NULL));
+				client_abort(client);
+				return;
+			}
+		}
+
+		if (ret < 0) {
+			client_error(client, "SSL_write: %s",
+					ERR_error_string(ERR_get_error(), NULL));
+			client_abort(client);
+			return;
+		}
+
+		client->sslbufsz -= ret;
+	} else {
+		while ((ret = evbuffer_write(client->wrbuf, client->fd)) > 0)
+			;
+
+		if (ret == 0) {
+			client->drain_cb(client, 0);
+			return;
+		}
+
+		if (ret == -1 && errno != EAGAIN)
+			client->drain_cb(client, errno);
 	}
-
-	if (ret == -1 && errno != EAGAIN)
-		client->drain_cb(client, errno);
 
 	event_add(&client->ev, &curconf->timeout);
 }

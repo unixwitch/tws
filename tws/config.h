@@ -42,6 +42,10 @@ typedef struct {
 	char	*port;
 	int	 backlog;
 	int	 protocol;
+	char	*ssl_cert;
+	char	*ssl_key;
+	char	*ssl_ciphers;
+	int	 ssl;
 } tws_listen_t;
 
 typedef struct {
