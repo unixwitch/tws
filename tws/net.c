@@ -67,6 +67,10 @@ listener_t	*l = NULL;
 int		 ret, fl;
 int		 one = 1;
 
+#ifdef SO_ACCEPTFILTER
+struct accept_filter_arg afa;
+#endif
+
 	if ((l = calloc(1, sizeof (*l))) == NULL)
 		goto err;
 	l->fd = -1;
@@ -116,6 +120,15 @@ int		 one = 1;
 			conf->addr, nbuf, conf->port, strerror(errno));
 		goto err;
 	}
+
+		       
+#ifdef SO_ACCEPTFILTER
+	bzero(&afa, sizeof(afa));
+	strcpy(afa.af_name, "httpready");
+	if (setsockopt(l->fd, SOL_SOCKET, SO_ACCEPTFILTER, &afa, sizeof(afa)) == -1)
+		log_warn("%s[%s]:%s: Enabling HTTP accept filter: %s", 
+			conf->addr, nbuf, conf->port, strerror(errno));
+#endif		
 
 	event_set(&l->ev, l->fd, EV_READ, accept_client, l);
 	event_priority_set(&l->ev, ACCEPT_PRIO);
