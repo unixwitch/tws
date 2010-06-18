@@ -120,6 +120,8 @@ struct accept_filter_arg afa;
 				goto err;
 			}
 		}
+
+		SSL_CTX_set_options(l->ssl_ctx, SSL_OP_NO_SSLv2);
 	}
 
 	if ((l->fd = socket(addr->ai_family, addr->ai_socktype, addr->ai_protocol)) == -1) {
@@ -639,6 +641,7 @@ int		 ret;
 		}
 
 		evbuffer_add(client->buffer, buf, ret);
+		client->request->len += ret;
 	} else {
 		ret = evbuffer_read(client->buffer, client->fd, READ_BUFSZ);
 	
@@ -657,6 +660,8 @@ int		 ret;
 			client_abort(client);
 			return;
 		}
+
+		client->request->len += ret;
 	}
 
 	/*
@@ -668,6 +673,7 @@ int		 ret;
 		event_add(&client->ev, &curconf->timeout);
 		return;
 	}
+
 
 	if (client_read_request(client) == -1) {
 		client_abort(client);

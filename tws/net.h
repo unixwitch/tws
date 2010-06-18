@@ -114,6 +114,7 @@ typedef struct {
 	http_version_t		 version;
 	http_method_t		 method;
 	vhost_t			*vhost;
+	off_t			 len;
 
 	struct {
 		int		 keepalive:1;		/* Client wants keep-alive	*/

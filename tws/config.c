@@ -122,6 +122,7 @@ static cfg_opt_t opts[] = {
 	CFG_INT("max-clients", 10000, CFGF_NONE),
 	CFG_INT("nfiles", 0, CFGF_NONE),
 	CFG_INT("nprocs", 0, CFGF_NONE),
+	CFG_INT("max-request-size", 1024 * 8, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -346,6 +347,7 @@ char		*s;
 		tcfg->nprocs = sysconf(_SC_NPROCESSORS_ONLN);
 		log_notice("Detected %d CPUs", tcfg->nprocs);
 	}
+	tcfg->maxrq = cfg_getint(cfg, "max-request-size");
 
 	for (i = 0, j = cfg_size(cfg, "compress-types"); i < j; i++)
 		g_ptr_array_add(
