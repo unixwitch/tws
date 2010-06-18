@@ -273,6 +273,14 @@ interp_t	*ip;
 		goto err;
 	}
 
+	if (req->post_length) {
+		fd_set_cloexec(req->fd_write);
+		fd_set_nonblocking(req->fd_write);
+	}
+
+	fd_set_cloexec(req->fd_read);
+	fd_set_nonblocking(req->fd_read);
+
 	g_ptr_array_free(envp, TRUE);
 	g_ptr_array_free(argv, TRUE);
 

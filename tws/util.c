@@ -6,6 +6,7 @@
 #include	<stdlib.h>
 #include	<string.h>
 #include	<unistd.h>
+#include	<fcntl.h>
 
 #include	"util.h"
 #include	"log.h"
@@ -86,4 +87,27 @@ char	*s = res;
 	return res;
 }
 
+int
+fd_set_nonblocking(int fd)
+{
+int	fl;
+	if ((fl = fcntl(fd, F_GETFL, 0)) == -1)
+		return -1;
+	fl |= O_NONBLOCK;
+	if (fcntl(fd, F_SETFL, fl) == -1)
+		return -1;
+	return 0;
+}
+
+int
+fd_set_cloexec(int fd)
+{
+int	fl;
+	if ((fl = fcntl(fd, F_GETFL, 0)) == -1)
+		return -1;
+	fl |= FD_CLOEXEC;
+	if (fcntl(fd, F_SETFL, fl) == -1)
+		return -1;
+	return 0;
+}
 

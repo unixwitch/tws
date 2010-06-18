@@ -95,16 +95,14 @@ struct accept_filter_arg afa;
 		goto err;
 	}
 
-	if ((fl = fcntl(l->fd, F_GETFL, 0)) == -1) {
-		log_error("%s[%s]:%s: fcntl(F_GETFL): %s", 
+	if (fd_set_cloexec(l->fd) == -1) {
+		log_error("%s[%s]:%s: fd_set_cloexec: %s", 
 			conf->addr, nbuf, conf->port, strerror(errno));
 		goto err;
 	}
 
-	fl |= FD_CLOEXEC | O_NONBLOCK;
-
-	if ((fl = fcntl(l->fd, F_SETFL, fl)) == -1) {
-		log_error("%s[%s]:%s: fcntl(F_SETFL): %s", 
+	if (fd_set_nonblocking(l->fd) == -1) {
+		log_error("%s[%s]:%s: fd_set_nonblocking: %s", 
 			conf->addr, nbuf, conf->port, strerror(errno));
 		goto err;
 	}
@@ -299,6 +297,9 @@ socklen_t		addrlen = sizeof(addr);
 		log_error("accept_client: %s", strerror(errno));
 		goto err;
 	}
+
+	fd_set_nonblocking(cfd);
+	fd_set_cloexec(cfd);
 
 	bcopy(&addr, &client->addr, sizeof(addr));
 	client->addrlen = addrlen;

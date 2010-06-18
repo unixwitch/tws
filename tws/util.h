@@ -13,4 +13,7 @@
 
 	char *htmlescape(const char *str);
 
+	int fd_set_nonblocking(int);
+	int fd_set_cloexec(int);
+
 #endif	/* !TWS_UTIL_H */
