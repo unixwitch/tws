@@ -21,6 +21,7 @@
 #include	<glib.h>
 #include	<event.h>
 #include	<evdns.h>
+#include	<zlib.h>
 
 #include	"net.h"
 #include	"config.h"
@@ -32,7 +33,11 @@
 char current_time[64] = "Thu, 1 Jan 1970 00:00:00 GMT";
 char *server_version;
 
-static int nclients;
+static struct timeval	 one_second = { 1, 0 };
+static int		 nclients;
+static struct event	 ev_time;
+static GPtrArray	*listeners;
+static struct event_base *default_base;
 
 static void accept_client(int, short, void *);
 static void client_start(client_t *);
@@ -49,8 +54,6 @@ static void exit_signal(int, short, void *);
 static void update_time(int, short, void *);
 static void suspend_listeners(void);
 static void start_listeners(void);
-
-static GPtrArray	*listeners;
 
 typedef struct {
 	int		fd;
@@ -91,18 +94,6 @@ struct accept_filter_arg afa;
 
 	if (setsockopt(l->fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one)) == -1) {
 		log_error("%s[%s]:%s: setsockopt(SO_REUSEADDR): %s", 
-			conf->addr, nbuf, conf->port, strerror(errno));
-		goto err;
-	}
-
-	if (fd_set_cloexec(l->fd) == -1) {
-		log_error("%s[%s]:%s: fd_set_cloexec: %s", 
-			conf->addr, nbuf, conf->port, strerror(errno));
-		goto err;
-	}
-
-	if (fd_set_nonblocking(l->fd) == -1) {
-		log_error("%s[%s]:%s: fd_set_nonblocking: %s", 
 			conf->addr, nbuf, conf->port, strerror(errno));
 		goto err;
 	}
@@ -182,16 +173,23 @@ net_listen()
 guint	i;
 static struct event ev_sigint;
 static struct event ev_sigterm;
-static struct event ev_time;
 struct timeval timeout = { 1, 0 };
 
 	server_version = g_strdup_printf("Toolserver-Web-Server/%s",
 			PACKAGE_VERSION);
 
-	if (event_init() == NULL) {
+	if ((default_base = event_init()) == NULL) {
 		log_error("event_init: %s", strerror(errno));
 		goto err;
 	}
+
+	log_notice("Using libevent %s [%s], zlib %s, Glib %d.%d.%d",
+			event_get_version(),
+			event_get_method(),
+			zlibVersion(),
+			glib_major_version,
+			glib_minor_version,
+			glib_micro_version);
 
 	if (evdns_init() == -1) {
 		log_error("evdns_init: %s", strerror(errno));
@@ -217,8 +215,8 @@ struct timeval timeout = { 1, 0 };
 	event_add(&ev_sigint, NULL);
 	event_add(&ev_sigterm, NULL);
 
-	event_set(&ev_time, 0, EV_TIMEOUT, update_time, NULL);
-	event_add(&ev_time, &timeout);
+	event_set(&ev_time, 0, EV_TIMEOUT | EV_PERSIST, update_time, NULL);
+	update_time(0, 0, NULL);
 
 	return 0;
 
@@ -231,6 +229,20 @@ err:
 void
 net_run(void)
 {
+guint	i;
+
+	for (i = 0; i < (curconf->nprocs - 1); ++i) {
+		if (fork() == 0)
+			break;
+	}
+	event_reinit(default_base);
+
+	for (i = 0; i < listeners->len; i++) {
+	int	fd = ((listener_t *) g_ptr_array_index(listeners, i))->fd;
+		fd_set_cloexec(fd);
+		fd_set_nonblocking(fd);
+	}
+
 	if (event_dispatch() == -1)
 		log_error("event_dispatch: %s", strerror(errno));
 }
@@ -284,7 +296,8 @@ socklen_t		addrlen = sizeof(addr);
 	event_add(&l->ev, NULL);
 
 	if ((cfd = accept(fd, (struct sockaddr *) &addr, &addrlen)) == -1) {
-		log_error("accept: %s", strerror(errno));
+		if (errno != EAGAIN)
+			log_error("accept: %s", strerror(errno));
 		return;
 	}
 
@@ -1093,12 +1106,23 @@ struct tm	*tm;
 	time(&now);
 	tm = gmtime(&now);
 	strftime(current_time, sizeof (current_time), "%a, %d %b %Y %H:%M:%S GMT", tm);
+
+#ifdef HAVE_SETPROCTITLE
+	if (curconf)
+		setproctitle("%d/%d clients", nclients, curconf->maxclients);
+#endif
+
+	event_add(&ev_time, &one_second);
 }
 
 void
 net_init(void)
 {
-	update_time(0, 0, NULL);
+time_t		 now;
+struct tm	*tm;
+	time(&now);
+	tm = gmtime(&now);
+	strftime(current_time, sizeof (current_time), "%a, %d %b %Y %H:%M:%S GMT", tm);
 }
 
 void

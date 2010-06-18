@@ -6,9 +6,21 @@
 user = "www"
 group = "www"
 
+# Number of processes to start.  If unset, this defaults to the number
+# of CPUs in the system.  Using multiple processes can improve performance
+# on SMP systems if the server is heavily loaded.  However, if most of
+# your load is in CGI/FastCGI programs, you could set this to 1, since
+# the additional processes will just take up memory.
+#
+# All configuration limits are specified per-process.  So, if you have
+# 2 processes and want to limit TWS to 10,000 clients, set max-clients
+# to 5000.
+#nprocs = 2
+
 # Set the open files limit at startup.  If TWS is started as root, this
 # can be set to any value up to the OS limit.  Otherwise, it can't be
-# raised above the hard limit.
+# raised above the hard limit.  Note that you need at least two files
+# per client, and more for CGI requests.
 nfiles = 1024
 
 # Maximum number of clients that we can serve at once.  Setting this too
@@ -36,7 +48,7 @@ listen "0.0.0.0:80" {
 # causing a lot of DNS load.
 resolve-hostnames = no
 
-# Client read/write timeout
+# Client read/write timeout.  Also used for keep-alive requests.
 timeout = 120
 
 # The default content type.  If you don't set this, no Content-Type header will
@@ -152,7 +164,7 @@ virtualhost "_default_" {
 		# in the document root or a userdir, suexec_weak allows anyone
 		# with access to the web server uid to run any program as any 
 		# (non-root) user on the system.  This is necessary to let it
-		# start interpreterss in e.g. /usr/local/bin.
+		# start interpreters in e.g. /usr/local/bin.
 		#
 		# Both suexec and suexec_weak need to be setuid to work, but for
 		# security reasons, are not installed that way.  Enable them

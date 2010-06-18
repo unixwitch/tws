@@ -16,7 +16,7 @@ FILE	*logfile;
 int
 log_open()
 {
-	logfile = stdout;
+	logfile = stderr;
 	return 0;
 }
 
@@ -34,6 +34,9 @@ vlog(type, fmt, ap)
 static const char *const types[] = {
 	"NOTICE", "WARNING", "ERROR"
 };
+
+	if (logfile == NULL)
+		logfile = stderr;
 
 	(void) fprintf(logfile, "[%s] %s: ", current_time, types[type]);
 	(void) vfprintf(logfile, fmt, ap);

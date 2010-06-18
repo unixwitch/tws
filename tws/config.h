@@ -60,6 +60,7 @@ typedef struct {
 	int		 maxclients;
 	int		 nfiles;
 	struct timeval	 timeout;
+	int		 nprocs;
 } tws_config_t;
 
 tws_config_t	*curconf;

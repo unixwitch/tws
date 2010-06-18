@@ -41,6 +41,7 @@ main(argc, argv)
 int		 fflag = 0;
 const char	*config = DEFAULT_CONFIG;
 int		 c;
+int		 i;
 
 	(void) argc;
 	(void) argv;

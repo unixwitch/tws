@@ -9,11 +9,13 @@
 #include	<string.h>
 #include	<stdlib.h>
 #include	<ctype.h>
+#include	<unistd.h>
 
 #include	<confuse.h>
 
 #include	"config.h"
 #include	"util.h"
+#include	"log.h"
 
 static int
 verify_protocol(cfg, opt, value, result)
@@ -115,6 +117,7 @@ static cfg_opt_t opts[] = {
 	CFG_BOOL("compress-cgi", 0, CFGF_NONE),
 	CFG_INT("max-clients", 10000, CFGF_NONE),
 	CFG_INT("nfiles", 0, CFGF_NONE),
+	CFG_INT("nprocs", 0, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -319,6 +322,11 @@ char		*s;
 	tcfg->compr_types = g_ptr_array_new_with_free_func(free);
 	tcfg->nfiles = cfg_getint(cfg, "nfiles");
 	tcfg->maxclients = cfg_getint(cfg, "max-clients");
+	tcfg->nprocs = cfg_getint(cfg, "nprocs");
+	if (tcfg->nprocs == 0) {
+		tcfg->nprocs = sysconf(_SC_NPROCESSORS_ONLN);
+		log_notice("Detected %d CPUs", tcfg->nprocs);
+	}
 
 	for (i = 0, j = cfg_size(cfg, "compress-types"); i < j; i++)
 		g_ptr_array_add(
