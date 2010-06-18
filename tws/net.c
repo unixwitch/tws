@@ -251,7 +251,7 @@ request_t	*request;
 	request = xcalloc(1, sizeof (*request));
 	request->headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
 	request->resp_headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, free);
-	request->fds[0] = request->fds[1] = -1;
+	request->cgi_write_buffer = evbuffer_new();
 
 	return request;
 }
@@ -946,6 +946,8 @@ free_request(request_t *req)
 	g_hash_table_destroy(req->headers);
 	g_hash_table_destroy(req->resp_headers);
 
+	evbuffer_free(req->cgi_write_buffer);
+
 	free(req->method_str);
 	free(req->filename);
 	free(req->username);
@@ -960,10 +962,11 @@ free_request(request_t *req)
 	if (req->fd > 0)
 		close(req->fd);
 
-	if (req->fds[0] > 0)
-		close(req->fds[0]);
-	if (req->fds[1] > 0)
-		close(req->fds[1]);
+	if (req->fd_write)
+		close(req->fd_write);
+	if (req->fd_read)
+		close(req->fd_read);
+
 	free(req);
 }
 

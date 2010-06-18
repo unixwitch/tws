@@ -143,13 +143,18 @@ typedef struct {
 
 	/* For CGI requests */
 	pid_t		 pid;
-	int		 fds[2];
+	int		 fd_write;
+	int		 fd_read;
 	struct event	 ev;
 	cgi_state_t	 cgi_state;
 
 	/* CGI headers read from the script */
 	GHashTable	*cgi_headers;
 	struct evbuffer	*cgi_buffer;
+	
+	/* For CGI PUT/POST */
+	off_t		 post_length;
+	struct evbuffer	*cgi_write_buffer;
 } request_t;
 
 	request_t	*request_new(void);

@@ -19,13 +19,16 @@
 #include	"util.h"
 
 static void cgi_read_callback(int, short, void *);
+static void cgi_write_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
+static void client_read_callback(int, short, void *);
 static void setup_cgi_environment(client_t *, GPtrArray *);
 static int spawn_cgi(
 	const char *dir,
 	const char *const *argp,
 	const char *const *envp,
-	int fds[2]);
+	int *fd_write,
+	int *fd_read);
 
 static void
 add_env(
@@ -50,6 +53,7 @@ char		*tz = getenv("TZ");
 GHashTableIter	 iter;
 gpointer	 key, value;
 request_t	*req = client->request;
+char		*h;
 
 	/* Missing:
 	 * SERVER_ADMIN
@@ -91,41 +95,98 @@ request_t	*req = client->request;
 		add_env(env, hdr, value);
 	}
 
+	if (req->post_length) {
+	char	len[64];
+		snprintf(len, sizeof (len), "%d", (int) req->post_length);
+		add_env(env, "CONTENT_LENGTH", len);
+	}
+
+	if ((h = g_hash_table_lookup(req->headers, "Content-Type")) != NULL)
+		add_env(env, "CONTENT_TYPE", h);
+
 	g_ptr_array_add(env, NULL);
 }
 
 pid_t
 spawn_cgi(
-	const char *dir,
-	const char *const *argv,
-	const char *const *envp,
-	int fds[2]
+	const char 		*dir,
+	const char *const 	*argv,
+	const char *const 	*envp,
+	int			*fd_write,
+	int			*fd_read
 )
 {
 posix_spawn_file_actions_t	fileactions;
 pid_t	pid;
 int	ret;
+int	fds_write[2], fds_read[2];
+
+	bzero(fds_write, sizeof(fds_write));
+	bzero(fds_read, sizeof(fds_read));
+
+	if (fd_write) {
+		if (socketpair(PF_UNIX, SOCK_STREAM, 0, fds_write) == -1) {
+			log_error("spawn_cgi: pipe: %s", strerror(errno));
+			goto err;
+		}
+		*fd_write = fds_write[1];
+	}
+
+	if (fd_read) {
+		if (socketpair(PF_UNIX, SOCK_STREAM, 0, fds_read) == -1) {
+			log_error("spawn_cgi: pipe: %s", strerror(errno));
+			goto err;
+		}
+		*fd_read = fds_read[0];
+	}
 
 	/* need to chdir to the docroot */
-	if (dir && chdir(dir) == -1)
-		return -1;
+	if (dir && chdir(dir) == -1) {
+		log_error("spawn_cgi: chdir(%s): %s",
+			dir, strerror(errno));
+		goto err;
+	}
 
 	posix_spawn_file_actions_init(&fileactions);
-	posix_spawn_file_actions_addclose(&fileactions, fds[0]);
-	posix_spawn_file_actions_adddup2(&fileactions, fds[1], STDOUT_FILENO);
-	posix_spawn_file_actions_addclose(&fileactions, fds[1]);
+
+	if (fd_read) {
+		posix_spawn_file_actions_addclose(&fileactions, fds_read[0]);
+		posix_spawn_file_actions_adddup2(&fileactions, fds_read[1], STDOUT_FILENO);
+		posix_spawn_file_actions_addclose(&fileactions, fds_read[1]);
+	}
+
+	if (fd_write) {
+		posix_spawn_file_actions_addclose(&fileactions, fds_write[1]);
+		posix_spawn_file_actions_adddup2(&fileactions, fds_write[0], STDIN_FILENO);
+		posix_spawn_file_actions_addclose(&fileactions, fds_write[0]);
+	}
 
 	ret = posix_spawn(&pid, argv[0], &fileactions, NULL,
 		(char *const *)argv, 
 		(char *const *)envp);
 	posix_spawn_file_actions_destroy(&fileactions);
 
+	if (fds_write[0])
+		close(fds_write[0]);
+	if (fds_read[1])
+		close(fds_read[1]);
+	fds_write[0] = fds_read[1] = 0;
+
 	if (dir && chdir("/") == -1) {
 		log_error("chdir(/): %s", strerror(errno));
 		_exit(1);
 	}
 
-	return ret == 0 ? pid : -1;
+	if (ret == -1)
+		goto err;
+	return 0;
+
+err:
+	if (fds_read[1])
+		close(fds_read[1]);
+	if (fds_write[0])
+		close(fds_write[0]);
+	return -1;
 }
 
 void
@@ -143,12 +204,17 @@ request_t	*req = client->request;
 char		*execname = NULL;
 interp_t	*ip;
 
-	req->cgi_state = CGI_READ_HEADERS;
+	if (req->method == M_POST) {
+	char	*len;
+		if ((len = g_hash_table_lookup(req->headers, "Content-Length")) == NULL) {
+			client_send_error(client, HTTP_LENGTH_REQUIRED);
+			return;
+		}
 
-	if (pipe(req->fds) == -1) {
-		log_error("spawn_cgi: pipe: %s", strerror(errno));
-		goto err;
+		req->post_length = atoi(len);
 	}
+
+	req->cgi_state = CGI_READ_HEADERS;
 
 	/* See if this is an interpreter request */
 	if ((ip = g_hash_table_lookup(req->vhost->interps, req->mimetype)) != NULL)
@@ -198,16 +264,14 @@ interp_t	*ip;
 	ret = spawn_cgi(dir, 
 		(const char *const *) argv->pdata, 
 		(const char *const *) envp->pdata,
-		req->fds);
+		req->post_length ? &req->fd_write : NULL,
+		&req->fd_read);
 
 	if (ret == -1) {
 		log_error("handle_cgi_request: %s: spawn_cgi: %s",
 				req->filename, strerror(errno));
 		goto err;
 	}
-
-	close(req->fds[1]);
-	req->fds[1] = -1;
 
 	g_ptr_array_free(envp, TRUE);
 	g_ptr_array_free(argv, TRUE);
@@ -216,9 +280,16 @@ interp_t	*ip;
 		outofmemory();
 	req->cgi_headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
 
-	event_set(&req->ev, req->fds[0], EV_READ,
-			cgi_read_callback, client);
-	event_add(&req->ev, NULL);
+	if  (req->post_length) {
+		event_set(&client->ev, client->fd, EV_READ,
+				client_read_callback, client);
+		event_add(&client->ev, &curconf->timeout);
+	} else {
+		event_set(&req->ev, req->fd_read, EV_READ,
+				cgi_read_callback, client);
+		event_add(&req->ev, NULL);
+	}
+
 	return;
 
 err:
@@ -226,10 +297,6 @@ err:
 		g_ptr_array_free(envp, TRUE);
 	if (argv)
 		g_ptr_array_free(argv, TRUE);
-	if (req->fds[0] != -1)
-		close(req->fds[0]);
-	if (req->fds[1] != -1)
-		close(req->fds[1]);
 	client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
 }
 
@@ -252,7 +319,7 @@ int		 ret;
 	 * If we're reading the body, just pass it through.
 	 */
 	if (client->request->cgi_state == CGI_READ_BODY) {
-		i = read(client->request->fds[0], buf, sizeof (buf));
+		i = read(client->request->fd_read, buf, sizeof (buf));
 
 		if (i == 0) {
 			client_close(client);
@@ -280,7 +347,7 @@ int		 ret;
 	 * signifying the start of the body.
 	 */
 	if ((ret = evbuffer_read(client->request->cgi_buffer,
-	    client->request->fds[0], READ_BUFSZ)) == -1) {
+	    client->request->fd_read, READ_BUFSZ)) == -1) {
 		if (errno == EAGAIN) {
 			event_add(&client->request->ev, NULL);
 			return;
@@ -366,3 +433,75 @@ client_write_callback(
 
 	event_add(&client->request->ev, NULL);
 }
+
+void
+client_read_callback(
+	int	fd,
+	short	what,
+	void	*arg
+)
+{
+client_t	*client = arg;
+request_t	*req = client->request;
+static char	 rdbuf[1024 * 256];
+ssize_t		 ret;
+ssize_t		 maxrd;
+
+	maxrd = sizeof (rdbuf) > req->post_length ? req->post_length : sizeof (rdbuf);
+	ret = read(fd, rdbuf, maxrd);
+	
+	if (ret == -1 && errno == EAGAIN) {
+		event_add(&client->ev, &curconf->timeout);
+		return;
+	}
+
+	if (ret == -1 || ret == 0) {
+		client_abort(client);
+		return;
+	}
+
+	req->post_length -= ret;
+	evbuffer_add(req->cgi_write_buffer, rdbuf, ret);
+	event_set(&req->ev, req->fd_write, EV_WRITE, cgi_write_callback, client);
+	event_add(&req->ev, NULL);
+}
+
+void
+cgi_write_callback(
+	int	fd,
+	short	what,
+	void	*arg
+)
+{
+client_t	*client = arg;
+request_t	*req = client->request;
+int		 ret;
+
+	while ((ret = evbuffer_write(req->cgi_write_buffer, req->fd_write)) > 0)
+		;
+
+	if (ret == -1 && errno == EAGAIN) {
+		event_add(&client->request->ev, NULL);
+		return;
+	}
+
+	if (ret == -1) {
+		client_error(client, "CGI write: %s", strerror(errno));
+		client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
+		return;
+	}
+
+	/* Buffer drained */
+	if (req->post_length) {
+		event_add(&client->ev, &curconf->timeout);
+		return;
+	}
+
+	/* No more data, switch to reading the CGI response */
+	close(req->fd_write);
+	req->fd_write = 0;
+	event_set(&req->ev, req->fd_read, EV_READ,
+			cgi_read_callback, client);
+	event_add(&req->ev, NULL);
+}
+
