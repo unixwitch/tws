@@ -48,7 +48,7 @@ handle_file_request(
 request_t	*req = client->request;
 const char	*host;
 struct stat	 sb;
-char		*path, *end, *s, *t, *ext;
+char		*path = NULL, *end, *s, *t, *ext;
 int		 iscgi = 0;
 time_t		 now;
 struct tm	*tm;
@@ -84,6 +84,7 @@ char		*ims;
 		req->urlname = xstrdup(req->url + 1);
 	}
 
+try_again:
 	s = g_uri_unescape_string(req->filename, NULL);
 	free(req->filename);
 	req->filename = s;
@@ -92,6 +93,7 @@ char		*ims;
 	 * Traverse the filename, and check each component of the path.  If
 	 * we end up at a file, the remainder of the URL is path info.
 	 */
+	free(path);
 	path = xstrdup(req->filename);
 	end = path + strlen(path);
 	s = t = path;
@@ -112,16 +114,17 @@ char		*ims;
 			switch (errno) {
 			case EACCES:
 				client_send_error(client, HTTP_FORBIDDEN);
-				return;
+				goto err;
+
 			default:
 				client_send_error(client, HTTP_NOT_FOUND);
-				return;
+				goto err;
 			}
 		}
 
 		if ((u = rindex(s, '/')) && !strcmp(u, "/..")) {
 			client_send_error(client, HTTP_NOT_FOUND);
-			return;
+			goto err;
 		}
 
 		/*
@@ -181,13 +184,13 @@ next:
 	if (iscgi) {
 		/* Our work here is done */
 		handle_cgi_request(client);
-		return;
+		goto err;
 	}
 
 	/* We only support GET and HEAD for files */
 	if (req->method != M_GET && req->method != M_HEAD) {
 		client_send_error(client, HTTP_FORBIDDEN);
-		return;
+		goto err;
 	}
 
 	if ((req->fd = open(req->filename, O_RDONLY)) == -1) {
@@ -209,16 +212,17 @@ next:
 			break;
 		}
 
-		return;
+		goto err;
 	}
 
 	if (fstat(req->fd, &sb) == -1) {
 		client_error(client, "%s", strerror(errno));
 		client_send_error(client, HTTP_NOT_FOUND);
-		return;
+		goto err;
 	}
 
 	if (S_ISDIR(sb.st_mode)) {
+	guint	i;
 		close(req->fd);
 		req->fd = -1;
 
@@ -228,17 +232,31 @@ next:
 			sprintf(rdname, "%s/", req->url);
 			client_redirect(client, rdname, HTTP_MOVED_PERMANENTLY);
 			free(rdname);
-			return;
+			goto err;
 		}
 
+		/*
+		 * Look for a directory index.
+		 */
+		for (i = 0; i < req->vhost->indexes->len; ++i) {
+		char	*fn;
+			fn = g_strdup_printf("%s%s", req->filename,
+				g_ptr_array_index(req->vhost->indexes, i));
+			if (stat(fn, &sb) == 0) {
+				free(req->filename);
+				req->filename = fn;
+				goto try_again;
+			}
+		}
+			
 		handle_directory(client);
-		return;
+		goto err;
 	}
 
 	if (!S_ISREG(sb.st_mode)) {
 		client_error(client, "not a regular file");
 		client_send_error(client, HTTP_FORBIDDEN);
-		return;
+		goto err;
 	}
 
 	/* Check for If-Modified-Since */
@@ -247,7 +265,7 @@ next:
 		if (strptime(ims, "%b, %d %a %Y %H:%M:%S GMT", &stm) != NULL) {
 			if (timegm(&stm) >= sb.st_mtime) {
 				client_send_error(client, HTTP_NOT_MODIFIED);
-				return;
+				goto err;
 			}
 		}
 	}
@@ -275,6 +293,11 @@ next:
 		client_add_header(client, "Content-Type", curconf->deftype);
 
 	client_start_response(client, headers_done);
+	free(path);
+	return;
+
+err:
+	free(path);
 }
 
 void
