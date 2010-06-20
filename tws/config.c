@@ -123,6 +123,7 @@ static cfg_opt_t opts[] = {
 	CFG_INT("nfiles", 0, CFGF_NONE),
 	CFG_INT("nprocs", 0, CFGF_NONE),
 	CFG_INT("max-request-size", 1024 * 8, CFGF_NONE),
+	CFG_STR("default-virtual-host", 0, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -438,6 +439,21 @@ char		*s;
 		g_ptr_array_add(tcfg->vhosts, vh);
 	}
 
+	if ((s = cfg_getstr(cfg, "default-virtual-host")) != NULL) {
+		for (i = 0; i < tcfg->vhosts->len; ++i) {
+		vhost_t	*vh = g_ptr_array_index(tcfg->vhosts, i);
+			if (!strcasecmp(s, vh->name)) {
+				tcfg->defvhost = vh;
+				break;
+			}
+		}
+
+		if (tcfg->defvhost == NULL) {
+			log_error("Default virtual host \"%s\" does not exist", s);
+			goto err;
+		}
+	}
+
 	return tcfg;
 
 err:
@@ -474,9 +490,11 @@ guint	i, j;
 	g_ptr_array_free(cfg->vhosts, TRUE);
 
 	for (i = 0; i < cfg->listeners->len; ++i) {
-	tws_listen_t	*ls = g_ptr_array_index(cfg->vhosts, i);
+	tws_listen_t	*ls = g_ptr_array_index(cfg->listeners, i);
 		free(ls->addr);
-		free(ls->port);
+		free(ls->ssl_key);
+		free(ls->ssl_cert);
+		free(ls->ssl_ciphers);
 	}
 	g_ptr_array_free(cfg->listeners, TRUE);
 

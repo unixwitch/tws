@@ -697,17 +697,14 @@ int		 ret;
 	}
 
 	/* Determine the vhost based on the Host header */
-	if ((host = g_hash_table_lookup(req->headers, "Host")) == NULL)
-		host = "_default_";
+	if ((host = g_hash_table_lookup(req->headers, "Host")) != NULL) {
+		if ((req->vhost = config_find_vhost(host)) == NULL)
+			req->vhost = curconf->defvhost;
+	} else
+		req->vhost = curconf->defvhost;
 
-	if ((req->vhost = config_find_vhost(host)) == NULL) {
-		host = "_default_";
-
-		if ((req->vhost = config_find_vhost(host)) == NULL) {
-			client_send_error(client, 404);
-			return;
-		}
-	}
+	if (req->vhost == NULL)
+		client_send_error(client, HTTP_NOT_FOUND);
 
 	/* Split off the query string */
 	if ((req->query = index(req->url, '?')) != NULL)

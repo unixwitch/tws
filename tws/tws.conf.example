@@ -100,11 +100,14 @@ compress-types = {
 	"application/*+xml"
 }
 
-# Any number of virtual hosts can be defined.  If none matches the client
-# request, _default_ will be served.  If _default_ is not defined, the client
-# will receive an error message.
+# All content must be contained inside a virtual host.  If the client does
+# not send a Host header, or an unknown Host is sent, default-virtual-host
+# will be used.  If no default-virtual-host is defined, a 404 error will
+# be returned.
 
-virtualhost "_default_" {
+default-virtual-host = "www.tcx.org.uk"
+
+virtualhost "www.tcx.org.uk" {
 	# Other names that refer to this host
 	aliases = {
 		"ilythia.tcx.org.uk"
