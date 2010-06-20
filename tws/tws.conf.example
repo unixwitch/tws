@@ -23,6 +23,9 @@ group = "www"
 # per client, and more for CGI requests.
 nfiles = 1024
 
+# Maximum request size to allow (not including POST body).
+max-request-size = 8192
+
 # Maximum number of clients that we can serve at once.  Setting this too
 # low will cause client requests to be delayed unnecessarily, while 
 # setting it too high will overload the system and cause resource
