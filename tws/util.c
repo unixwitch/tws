@@ -121,7 +121,7 @@ unsigned char	*s = (unsigned char *) key;
 guint		 hash = 0x811C9DC5;
 	while (*s) {
 		hash *= FNV_PRIME;
-		hash ^= *s++;
+		hash ^= tolower(*s++);
 	}
 	return hash;
 }
