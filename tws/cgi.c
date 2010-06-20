@@ -332,7 +332,7 @@ interp_t	*ip;
 
 	if ((req->cgi_buffer = evbuffer_new()) == NULL)
 		outofmemory();
-	req->cgi_headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
+	req->cgi_headers = g_hash_table_new_full(hdr_hash, hdr_equal, free, NULL);
 
 	if  (req->post_length) {
 		event_set(&client->ev, client->fd, EV_READ,

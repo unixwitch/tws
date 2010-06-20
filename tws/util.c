@@ -8,6 +8,8 @@
 #include	<unistd.h>
 #include	<fcntl.h>
 
+#include	<glib.h>
+
 #include	"util.h"
 #include	"log.h"
 
@@ -111,3 +113,24 @@ int	fl;
 	return 0;
 }
 
+guint
+hdr_hash(gconstpointer key)
+{
+#define FNV_PRIME ((guint)0x01000193)
+unsigned char	*s = (unsigned char *) key;
+guint		 hash = 0x811C9DC5;
+	while (*s) {
+		hash *= FNV_PRIME;
+		hash ^= *s++;
+	}
+	return hash;
+}
+
+gboolean
+hdr_equal(
+	gconstpointer	a,
+	gconstpointer	b
+)
+{
+	return !strcasecmp(a, b);
+}

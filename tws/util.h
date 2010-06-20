@@ -16,4 +16,7 @@
 	int fd_set_nonblocking(int);
 	int fd_set_cloexec(int);
 
+	guint hdr_hash(gconstpointer key);
+	gboolean hdr_equal(gconstpointer a, gconstpointer b);
+
 #endif	/* !TWS_UTIL_H */

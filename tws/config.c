@@ -234,7 +234,7 @@ int		 i, j;
 	}
 
 	vh->cgitypes = g_hash_table_new_full(
-			g_str_hash, g_str_equal,
+			hdr_hash, hdr_equal,
 			free, NULL);
 
 	vh->cgidirs = g_hash_table_new_full(
@@ -257,7 +257,7 @@ int		 i, j;
 	}
 
 	vh->interps = g_hash_table_new_full(
-		g_str_hash, g_str_equal, free, free);
+		hdr_hash, hdr_equal, free, free);
 
 	for (i = 0, j = cfg_size(cfg, "interpreter"); i < j; ++i) {
 	cfg_t		*ipc = cfg_getnsec(cfg, "interpreter", i);
@@ -362,7 +362,7 @@ char		*s;
 			xstrdup(cfg_getnstr(cfg, "index-file", i)));
 
 	tcfg->mimetypes = g_hash_table_new_full(
-			g_str_hash, g_str_equal,
+			hdr_hash, hdr_equal,
 			free, NULL);
 
 	if ((s = cfg_getstr(cfg, "mime-type-file")) != NULL) {

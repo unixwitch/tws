@@ -311,8 +311,8 @@ request_new()
 request_t	*request;
 
 	request = xcalloc(1, sizeof (*request));
-	request->headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, NULL);
-	request->resp_headers = g_hash_table_new_full(g_str_hash, g_str_equal, free, free);
+	request->headers = g_hash_table_new_full(hdr_hash, hdr_equal, free, NULL);
+	request->resp_headers = g_hash_table_new_full(hdr_hash, hdr_equal, free, free);
 	request->cgi_write_buffer = evbuffer_new();
 
 	return request;
@@ -1129,6 +1129,11 @@ const char	*body = NULL;
 		status = "Request too large";
 		body = "The request was larger than the configured maximum "
 			"request size.\n";
+		break;
+
+	case HTTP_LENGTH_REQUIRED:
+		status = "Length required";
+		body = "The POST request must have a Content-Length header.\n";
 		break;
 
 	default:
