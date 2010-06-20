@@ -470,6 +470,7 @@ int		 ret;
 	client_start_response(client, client_write_callback);
 
 	evbuffer_add_buffer(client->wrbuf, client->request->cgi_buffer);
+	client_drain(client, client_write_callback);
 }
 
 
@@ -540,8 +541,16 @@ int		 ret;
 	}
 
 	if (ret == -1) {
-		client_error(client, "CGI write: %s", strerror(errno));
-		client_send_error(client, HTTP_INTERNAL_SERVER_ERROR);
+		/* 
+		 * CGI write errors aren't fatal; the script might not be
+		 * expecting a POST body.  Just switch to reading the
+		 * response, and we'll detect any errors there.
+		 */
+		close(req->fd_write);
+		req->fd_write = 0;
+		event_set(&req->ev, req->fd_read, EV_READ,
+				cgi_read_callback, client);
+		event_add(&req->ev, NULL);
 		return;
 	}
 
