@@ -670,10 +670,19 @@ int		 ret;
 	 */
 	if (evbuffer_find(client->buffer, (const u_char *) "\r\n\r\n", 4) == NULL &&
 	    evbuffer_find(client->buffer, (const u_char *) "\n\n", 2) == NULL) {
+		if (client->request->len > curconf->maxrq) {
+			client_send_error(client, HTTP_REQUEST_TOO_LARGE);
+			return;
+		}
+
 		event_add(&client->ev, &curconf->timeout);
 		return;
 	}
 
+	if (client->request->len > curconf->maxrq) {
+		client_send_error(client, HTTP_REQUEST_TOO_LARGE);
+		return;
+	}
 
 	if (client_read_request(client) == -1) {
 		client_abort(client);
@@ -1095,25 +1104,31 @@ const char	*status;
 const char	*body = NULL;
 
 	switch (code) {
-	case 304:
+	case HTTP_NOT_MODIFIED:
 		status = "Not modified";
 		break;
 
-	case 403:
+	case HTTP_FORBIDDEN:
 		status = "Forbidden";
 		body = "Access to the requested resource was denied.\n";
 		break;
 
-	case 404:
+	case HTTP_NOT_FOUND:
 		status = "Not found";
 		body = "The requested resource was not found "
 			"on this server.\n";
 		break;
 
-	case 500:
+	case HTTP_INTERNAL_SERVER_ERROR:
 		status = "Internal server error";
 		body = "The server encountered an internal error while "
 			"trying to process your request.\n";
+		break;
+
+	case HTTP_REQUEST_TOO_LARGE:
+		status = "Request too large";
+		body = "The request was larger than the configured maximum "
+			"request size.\n";
 		break;
 
 	default:
