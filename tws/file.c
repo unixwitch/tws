@@ -84,6 +84,10 @@ char		*ims;
 		req->urlname = xstrdup(req->url + 1);
 	}
 
+	s = g_uri_unescape_string(req->filename, NULL);
+	free(req->filename);
+	req->filename = s;
+
 	/*
 	 * Traverse the filename, and check each component of the path.  If
 	 * we end up at a file, the remainder of the URL is path info.
