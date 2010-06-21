@@ -40,21 +40,162 @@ static char *get_filename(request_t *);
 static char *get_userdir(request_t *);
 static void handle_directory(client_t *);
 
-void
-handle_file_request(
-	client_t	*client
+#define OPEN_FLAGS (O_RDONLY | O_NOCTTY | O_NONBLOCK)
+
+/*
+ * Simple non-reentrant path iterator.  Returns each component in
+ * 'path'.
+ */
+char *
+path_iterate(const char *path, const char **pos)
+{
+static const char       *arg = NULL, *part;
+static char             *comp = NULL;
+static int               done = 0;
+char                    *s;
+ptrdiff_t                len;
+
+        if (!path) {
+                free(comp);
+		arg = comp = NULL;
+		done = 0;
+		return NULL;
+	}
+
+	if (path != arg) {
+                arg = part = path;
+                done = 0;
+                comp = malloc(strlen(path) + 1);
+                if (*part == '/')
+                        part++;
+	}
+
+        if (done)
+                return NULL;
+
+        if ((s = index(part, '/')) == NULL) {
+		if (pos)
+			*pos = part;
+
+                done = 1;
+                strcpy(comp, part);
+                return comp;
+        }
+
+	if (pos)
+		*pos = part;
+
+        len = s - part;
+        memcpy(comp, part, len);
+        comp[len] = '\0';
+
+        while (*s == '/')
+                s++;
+
+        if (*s == '\0')
+                done = 1;
+
+        part = s;
+        return comp;
+}
+
+static int
+traverse(
+	client_t	*client,
+	request_t	*req,
+	struct stat	*sb,
+	int		*iscgi
 )
 {
-request_t	*req = client->request;
-const char	*host;
-struct stat	 sb;
-char		*path = NULL, *end, *s, *t, *ext;
-int		 iscgi = 0;
-time_t		 now;
-struct tm	*tm;
-char		 tbuf[64], clen[64];
-char		*ims;
+char		*part;
+const char	*pos;
+int		 cd = -1, cur = -1;
 
+	if ((cd = open("/", OPEN_FLAGS)) == -1) {
+		client_error(client, "open(/): %s", strerror(errno));
+		client_send_error(client, HTTP_NOT_FOUND);
+		return -1;
+	}
+
+	path_iterate(NULL, NULL);
+	while ((part = path_iterate(req->filename, &pos)) != NULL) {
+	char		*u;
+
+		if (!strcmp(part, "..")) {
+			client_send_error(client, HTTP_NOT_FOUND);
+			goto err;
+		}
+
+		if ((cur = openat(cd, part, OPEN_FLAGS)) == -1) {
+			client_error(client, "%s", strerror(errno));
+
+			switch (errno) {
+			case EACCES:
+				client_send_error(client, HTTP_FORBIDDEN);
+				goto err;
+
+			default:
+				client_send_error(client, HTTP_NOT_FOUND);
+				goto err;
+			}
+		}
+
+		if (fstat(cur, sb) == -1) {
+			client_error(client, "fstat: %s", strerror(errno));
+			client_send_error(client, HTTP_NOT_FOUND);
+			goto err;
+		}
+
+		/*
+		 * Found a file.  If there's any more URL left, turn it into
+		 * path info for CGI requests.
+		 */
+		if (!S_ISDIR(sb->st_mode)) {
+		char		*ext;
+		const char	*pi;
+
+			if (path_iterate(req->filename, &pi)) {
+				/*
+				 * Request has pathinfo; store it in req and remove it
+				 * from urlname.
+				 */
+				req->pathinfo = xstrdup(pi - 1);
+				req->urlname[strlen(req->urlname) - strlen(req->pathinfo)] = '\0';
+			}
+
+			close(cd);
+			break;
+		}
+
+		/*
+		 * If we're now inside a CGI directory, mark this as a CGI request.
+		 */
+#if 0
+		if (g_hash_table_lookup_extended(req->vhost->cgidirs, s, NULL, NULL))
+			*iscgi = 1;
+#endif
+
+		close(cd);
+		cd = cur;
+		cur = -1;
+	}
+
+	return cur == -1 ? cd : cur;
+
+err:
+	if (cd != -1)
+		close(cd);
+	if (cur != -1)
+		close(cur);
+	return -1;
+}
+
+static int
+get_pathname(
+	client_t	*client,
+	request_t	*req
+)
+{
 	/*
 	 * Transform the filename into either a docroot or userdir request.
 	 * We also set 'urlname' here.  This is the part of the URL excluding
@@ -72,160 +213,59 @@ char		*ims;
 		/* This is a userdir request */
 		if ((req->filename = get_userdir(req)) == NULL) {
 			client_send_error(client, HTTP_BAD_REQUEST);
-			return;
+			return -1;
 		}
 		if ((s = index(req->url + strlen(req->vhost->userdir_prefix), '/')) != NULL)
 			req->urlname = xstrdup(s + 1);
 	} else {
 		if ((req->filename = get_filename(req)) == NULL) {
 			client_send_error(client, HTTP_BAD_REQUEST);
-			return;
+			return -1;
 		}
 		req->urlname = xstrdup(req->url + 1);
 	}
 
-try_again:
+	return 0;
+}
+
+void
+handle_file_request(
+	client_t	*client
+)
+{
+request_t	*req = client->request;
+const char	*host;
+struct stat	 sb;
+char		*s;
+int		 iscgi = 0;
+time_t		 now;
+struct tm	*tm;
+char		 tbuf[64], clen[64];
+char		*ims, *ext;
+
+	if (get_pathname(client, req) == -1)
+		goto err;
+
 	s = g_uri_unescape_string(req->filename, NULL);
 	free(req->filename);
 	req->filename = s;
 
 	/*
-	 * Traverse the filename, and check each component of the path.  If
-	 * we end up at a file, the remainder of the URL is path info.
+	 * Traverse the filename to find which file the URL refers to.
 	 */
-	free(path);
-	path = xstrdup(req->filename);
-	end = path + strlen(path);
-	s = t = path;
-	for (;;) {
-	struct stat	 sb;
-	char		*u;
-		t = strchr(t, '/');
-		if (t)
-			*t = '\0';
+	if ((req->fd = traverse(client, req, &sb, &iscgi)) == -1)
+		goto err;
 
-		if (!*s)
-			/* Empty component */
-			goto next;
-
-		if (stat(s, &sb) == -1) {
-			client_error(client, "%s", strerror(errno));
-
-			switch (errno) {
-			case EACCES:
-				client_send_error(client, HTTP_FORBIDDEN);
-				goto err;
-
-			default:
-				client_send_error(client, HTTP_NOT_FOUND);
-				goto err;
-			}
-		}
-
-		if ((u = rindex(s, '/')) && !strcmp(u, "/..")) {
-			client_send_error(client, HTTP_NOT_FOUND);
-			goto err;
-		}
-
-		/*
-		 * Found a file.  If there's any more URL left, turn it into
-		 * path info for CGI requests.
-		 */
-		if (!S_ISDIR(sb.st_mode)) {
-			if (t && t != end) {
-				/*
-				 * Request has pathinfo; store it in req and remove it
-				 * from urlname.
-				 */
-				req->pathinfo = xstrdup(req->filename + strlen(s));
-				*t = '\0';
-				req->urlname[strlen(req->urlname) - strlen(req->pathinfo)] = '\0';
-			}
-
-			free(req->filename);
-			req->filename = s;
-
-			/* Identify the MIME type */
-			if ((ext = rindex(s, '.')) != NULL &&
-			    ext > rindex(s, '/')) {
-				req->mimetype = g_hash_table_lookup(
-					curconf->mimetypes, ext + 1);
-			}
-
-			break;
-		}
-
-		/*
-		 * If we're now inside a CGI directory, mark this as a CGI request.
-		 */
-		if (g_hash_table_lookup_extended(req->vhost->cgidirs, s, NULL, NULL))
-			iscgi = 1;
-
-next:
-		/* Move to the next component */
-		if (t == end || !t)
-			break;
-
-		*t = '/';
-		while (*t == '/')
-			t++;
-	}
+	fd_set_cloexec(req->fd);
 
 	/*
-	 * Check if the MIME type forces this to be a CGI request.  If so,
-	 * pass it off to the CGI handler.
+	 * If filename is a directory, check for a directory index.
 	 */
-	if (req->mimetype)
-		if (g_hash_table_lookup_extended(req->vhost->cgitypes, req->mimetype, NULL, NULL))
-			iscgi = 1;
-		else if (g_hash_table_lookup(req->vhost->interps, req->mimetype))
-			iscgi = 1;
-
-	if (iscgi) {
-		/* Our work here is done */
-		handle_cgi_request(client);
-		goto err;
-	}
-
-	/* We only support GET and HEAD for files */
-	if (req->method != M_GET && req->method != M_HEAD) {
-		client_send_error(client, HTTP_FORBIDDEN);
-		goto err;
-	}
-
-	if ((req->fd = open(req->filename, O_RDONLY)) == -1) {
-		client_error(client, "%s", strerror(errno));
-
-		switch (errno) {
-		case EACCES:
-			client_send_error(client, HTTP_FORBIDDEN);
-			break;
-
-		/*
-		 * We return 404 for any other error.  It could be caused by
-		 * many things other than file not found (e.g. I/O error),
-		 * but in the end, they all mean that we couldn't find the
-		 * file.
-		 */
-		default:
-			client_send_error(client, HTTP_NOT_FOUND);
-			break;
-		}
-
-		goto err;
-	}
-
-	if (fstat(req->fd, &sb) == -1) {
-		client_error(client, "%s", strerror(errno));
-		client_send_error(client, HTTP_NOT_FOUND);
-		goto err;
-	}
-
 	if (S_ISDIR(sb.st_mode)) {
 	guint	i;
-		close(req->fd);
-		req->fd = -1;
+	int	have_index = 0;
 
+		/* Redirect /dir to /dir/ */
 		if (req->url[strlen(req->url) - 1] != '/') {
 		char	*rdname = xmalloc(strlen(req->url) + 2);
 
@@ -239,17 +279,66 @@ next:
 		 * Look for a directory index.
 		 */
 		for (i = 0; i < req->vhost->indexes->len; ++i) {
+		char	*index = g_ptr_array_index(req->vhost->indexes, i);
+		int	 newfd;
 		char	*fn;
-			fn = g_strdup_printf("%s%s", req->filename,
-				g_ptr_array_index(req->vhost->indexes, i));
-			if (stat(fn, &sb) == 0) {
-				free(req->filename);
-				req->filename = fn;
-				goto try_again;
+
+			if ((newfd = openat(req->fd, index, OPEN_FLAGS)) == -1) {
+				if (errno != ENOENT) {
+					client_error(client, "%s: %s",
+						index, strerror(errno));
+					client_send_error(client, HTTP_NOT_FOUND);
+					goto err;
+				}
+
+				continue;
 			}
+
+			fd_set_cloexec(newfd);
+
+			close(req->fd);
+			req->fd = newfd;
+			if (fstat(req->fd, &sb) == -1) {
+				client_error(client, "%s: fstat: %s",
+					index, strerror(errno));
+				client_send_error(client, HTTP_NOT_FOUND);
+				goto err;
+			}
+
+			fn = g_strdup_printf("%s%s", req->filename, index);
+			free(req->filename);
+			req->filename = fn;
+			have_index = 1;
+			break;
 		}
 			
-		handle_directory(client);
+		if (!have_index) {
+			handle_directory(client);
+			goto err;
+		}
+	}
+
+	/* Look for MIME type */
+	if ((ext = rindex(req->filename, '.')) != NULL && ext > rindex(req->filename, '/'))
+		req->mimetype = g_hash_table_lookup(curconf->mimetypes, ext + 1);
+
+	if (req->mimetype)
+		if (g_hash_table_lookup_extended(req->vhost->cgitypes, req->mimetype, NULL, NULL))
+			iscgi = 1;
+		else if (g_hash_table_lookup(req->vhost->interps, req->mimetype))
+			iscgi = 1;
+
+	if (iscgi) {
+		/* Our work here is done */
+		close(req->fd);
+		req->fd = -1;
+		handle_cgi_request(client);
+		goto err;
+	}
+
+	/* We only support GET and HEAD for files */
+	if (req->method != M_GET && req->method != M_HEAD) {
+		client_send_error(client, HTTP_FORBIDDEN);
 		goto err;
 	}
 
@@ -272,7 +361,7 @@ next:
 
 	req->bytesleft = sb.st_size;
 
-	req->resp_status = "200 OK";
+	req->resp_status = xstrdup("200 OK");
 
 	snprintf(clen, sizeof (clen), "%lu", (long unsigned) sb.st_size);
 	client_add_header(client, "Content-Length", clen);
@@ -293,11 +382,10 @@ next:
 		client_add_header(client, "Content-Type", curconf->deftype);
 
 	client_start_response(client, headers_done);
-	free(path);
 	return;
 
 err:
-	free(path);
+	return;
 }
 
 void
@@ -320,9 +408,9 @@ headers_done(
 		return;
 	}
 
-	/* sendfile cannot be used with compression */
+	/* sendfile cannot be used with compression or encryption */
 #ifdef USE_SENDFILE
-	if (curconf->use_sendfile && !client->request->compress) {
+	if (curconf->use_sendfile && !client->request->compress && !client->ssl) {
 		event_set(&client->ev, client->fd, EV_WRITE, sendfile_callback, client);
 		sendfile_callback(client->fd, EV_WRITE, client);
 	} else
@@ -419,7 +507,7 @@ char		*uname, *s, *fname;
 	if ((s = strchr(uname, '/')) != NULL)
 		*s++ = '\0';
 
-	req->username = strdup(uname);
+	req->username = xstrdup(uname);
 	req->flags.userdir = 1;
 
 	if ((pwd = getpwnam(uname)) == NULL) {
@@ -478,7 +566,6 @@ dir_start_write(client_t *client, int error)
 GArray		*dirents = NULL;
 DIR		*dir = NULL;
 struct dirent	*de;
-char		 p[PATH_MAX];
 guint		 i, end;
 char		*escurl;
 
@@ -488,8 +575,8 @@ char		*escurl;
 		return;
 	}
 
-	if ((dir = opendir(client->request->filename)) == NULL) {
-		client_error(client, "opendir: %s", strerror(errno));
+	if ((dir = fdopendir(client->request->fd)) == NULL) {
+		client_error(client, "fdopendir: %s", strerror(errno));
 		goto err;
 	}
 
@@ -539,16 +626,15 @@ char		*escurl;
 		if (*de->d_name == '.')
 			continue;
 
-		bzero(&ent, sizeof(ent));
-		ent.name = htmlescape(de->d_name);
-
-		snprintf(p, sizeof (p), "%s/%s", client->request->filename, de->d_name);
-		if (stat(p, &sb) == -1) {
+		if (fstatat(client->request->fd, de->d_name, &sb, 0) == -1) {
 			client_error(client, "%s: stat: %s",
-					p, strerror(errno));
+					de->d_name, strerror(errno));
 			free(ent.name);
 			continue;
 		}
+
+		bzero(&ent, sizeof(ent));
+		ent.name = htmlescape(de->d_name);
 
 		if (S_ISDIR(sb.st_mode))
 			ent.isdir = 1;
@@ -559,6 +645,7 @@ char		*escurl;
 
 	closedir(dir);
 	dir = NULL;
+	client->request->fd = -1;
 
 	g_array_sort(dirents, dircmp);
 
@@ -609,7 +696,12 @@ err:
 void
 handle_directory(client_t *client)
 {
-	client->request->resp_status = "200 OK";
+	if (client->request->method != M_GET) {
+		client_send_error(client, HTTP_FORBIDDEN);
+		return;
+	}
+
+	client->request->resp_status = xstrdup("200 OK");
 	client_add_header(client, "Content-Type", "text/html");
 	client_start_response(client, dir_start_write);
 }

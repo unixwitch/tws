@@ -545,19 +545,19 @@ client_start(client_t *client)
 {
 int	ret;
 
-	event_set(&client->ev, client->fd, EV_READ, client_read, client);
+	event_set(&client->ev, client->fd, EV_READ | EV_TIMEOUT, client_read, client);
 
 	if (client->ssl) {
 		if ((ret = SSL_accept(client->ssl)) != 1) {
 			switch (SSL_get_error(client->ssl, ret)) {
 			case SSL_ERROR_WANT_READ:
 				event_set(&client->ev, client->fd,
-					EV_READ, client_restart, client);
+					EV_READ | EV_TIMEOUT, client_restart, client);
 				event_add(&client->ev, &curconf->timeout);
 				return;
 			case SSL_ERROR_WANT_WRITE:
 				event_set(&client->ev, client->fd,
-					EV_WRITE, client_restart, client);
+					EV_WRITE | EV_TIMEOUT, client_restart, client);
 				event_add(&client->ev, &curconf->timeout);
 				return;
 			default:
@@ -592,8 +592,7 @@ request_t	*req = client->request;
 char		*line, *host, *conn;
 int		 ret;
 
-	event_set(&client->ev, client->fd, EV_READ, client_read, client);
-
+	event_set(&client->ev, client->fd, EV_READ | EV_TIMEOUT, client_read, client);
 	if (what == EV_TIMEOUT) {
 		client_abort(client);
 		return;
@@ -603,15 +602,14 @@ int		 ret;
 	char	buf[READ_BUFSZ];
 	int	ret, err;
 		ret = SSL_read(client->ssl, buf, sizeof (buf));
-
 		if (ret == 0) {
 			switch (SSL_get_error(client->ssl, ret)) {
 			case SSL_ERROR_WANT_READ:
-				event_set(&client->ev, client->fd, EV_READ, client_read, client);
+				event_set(&client->ev, client->fd, EV_READ | EV_TIMEOUT, client_read, client);
 				event_add(&client->ev, &curconf->timeout);
 				return;
 			case SSL_ERROR_WANT_WRITE:
-				event_set(&client->ev, client->fd, EV_WRITE, client_read, client);
+				event_set(&client->ev, client->fd, EV_WRITE | EV_TIMEOUT, client_read, client);
 				event_add(&client->ev, &curconf->timeout);
 				return;
 			case SSL_ERROR_ZERO_RETURN:
@@ -797,11 +795,13 @@ char	*header, *value;
 	/* Blank line means end of request */
 	if (!*header) {
 		client->state = HANDLE_REQUEST;
+		free(header);
 		return 0;
 	}
 
 	if ((value = strstr(header, ": ")) == NULL) {
 		/* Invalid header */
+		free(header);
 		client_abort(client);
 		return -1;
 	}
@@ -829,7 +829,7 @@ request_t	*req = client->request;
 	if ((req->url = strchr(req->method_str, ' ')) == NULL) {
 		/* Invalid request */
 		client_abort(client);
-		return -1;
+		goto err;
 	}
 
 	/* Read request URL */
@@ -837,7 +837,7 @@ request_t	*req = client->request;
 	if ((s = strchr(req->url, ' ')) == NULL) {
 		/* Invalid request */
 		client_abort(client);
-		return -1;
+		goto err;
 	}
 
 	/* Read HTTP version */
@@ -849,7 +849,7 @@ request_t	*req = client->request;
 	else {
 		/* Unknown HTTP version */
 		client_abort(client);
-		return -1;
+		goto err;
 	}
 
 	if (!strcmp(req->method_str, "GET"))
@@ -864,7 +864,12 @@ request_t	*req = client->request;
 		req->method = M_UNKNOWN;
 
 	client->state = READ_HEADERS;
+	free(line);
 	return 0;
+
+err:
+	free(line);
+	return -1;
 }
 
 static void
@@ -881,7 +886,6 @@ void
 client_abort(client_t *client)
 {
 	assert(client);
-
 	if (client->ssl) {
 	int	ret;
 		for (;;) {
@@ -894,28 +898,30 @@ client_abort(client_t *client)
 			}
 
 			if (ret == 0)
-				break; /*continue;*/
+				break;
 
 			if (ret < -1) {
 				switch (SSL_get_error(client->ssl, ret)) {
 				case SSL_ERROR_WANT_READ:
-					event_set(&client->ev, client->fd, EV_READ, client_reabort, client);
-					event_add(&client->ev, NULL);
+					event_set(&client->ev, client->fd, EV_READ | EV_TIMEOUT, client_reabort, client);
+					event_add(&client->ev, &curconf->timeout);
 					return;
 				case SSL_ERROR_WANT_WRITE:
-					event_set(&client->ev, client->fd, EV_WRITE, client_reabort, client);
-					event_add(&client->ev, NULL);
+					event_set(&client->ev, client->fd, EV_WRITE | EV_TIMEOUT, client_reabort, client);
+					event_add(&client->ev, &curconf->timeout);
 					return;
 				default:
 					client_error(client, "SSL_shutdown: %s",
 							ERR_error_string(ERR_get_error(), NULL));
-					client_abort(client);
-					return;
+					SSL_free(client->ssl);
+					client->ssl = NULL;
+					break;
 				}
 			}
 		}
 	}
 
+	event_del(&client->ev);
 	close(client->fd);
 
 	free_request(client->request);
@@ -1001,7 +1007,7 @@ client_last_chunk_done(
 	free_request(client->request);
 	client->request = request_new();
 
-	event_set(&client->ev, client->fd, EV_READ, client_read, client);
+	event_set(&client->ev, client->fd, EV_READ | EV_TIMEOUT, client_read, client);
 	event_add(&client->ev, &curconf->timeout);
 }
 
@@ -1036,12 +1042,12 @@ int		 ret;
 		if (ret == 0) {
 			switch (SSL_get_error(client->ssl, ret)) {
 			case SSL_ERROR_WANT_READ:
-				event_set(&client->ev, client->fd, EV_READ, client_read, client);
-				event_add(&client->ev, NULL);
+				event_set(&client->ev, client->fd, EV_READ | EV_TIMEOUT, client_drain_ready, client);
+				event_add(&client->ev, &curconf->timeout);
 				return;
 			case SSL_ERROR_WANT_WRITE:
-				event_set(&client->ev, client->fd, EV_WRITE, client_read, client);
-				event_add(&client->ev, NULL);
+				event_set(&client->ev, client->fd, EV_WRITE | EV_TIMEOUT, client_drain_ready, client);
+				event_add(&client->ev, &curconf->timeout);
 				return;
 			default:
 				client_error(client, "SSL_write: %s",
@@ -1084,7 +1090,7 @@ client_drain(
 	assert(client);
 	assert(client->wrbuf);
 
-	event_set(&client->ev, client->fd, EV_WRITE,
+	event_set(&client->ev, client->fd, EV_WRITE | EV_TIMEOUT,
 			client_drain_ready, client);
 	client->drain_cb = cb;
 
@@ -1206,16 +1212,24 @@ free_request(request_t *req)
 	if (!req)
 		return;
 
-	g_hash_table_destroy(req->headers);
-	g_hash_table_destroy(req->resp_headers);
+	if (req->headers)
+		g_hash_table_destroy(req->headers);
+	if (req->resp_headers)
+		g_hash_table_destroy(req->resp_headers);
+	if (req->cgi_headers)
+		g_hash_table_destroy(req->cgi_headers);
 
-	evbuffer_free(req->cgi_write_buffer);
+	if (req->cgi_write_buffer)
+		evbuffer_free(req->cgi_write_buffer);
+	if (req->cgi_buffer)
+		evbuffer_free(req->cgi_buffer);
 
 	free(req->method_str);
 	free(req->filename);
 	free(req->username);
 	free(req->pathinfo);
 	free(req->urlname);
+	free(req->resp_status);
 
 	if (req->zstream) {
 		deflateEnd(req->zstream);
@@ -1418,6 +1432,7 @@ va_list	 ap;
 	va_end(ap);
 
 	client_write(client, data, strlen(data));
+	free(data);
 };
 
 void
@@ -1516,7 +1531,6 @@ char		*header, *value;
 
 	evbuffer_add_printf(client->wrbuf, "\r\n");
 	client_drain(client, callback);
-
 }
 
 void
