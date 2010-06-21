@@ -21,6 +21,7 @@
 static void cgi_read_callback(int, short, void *);
 static void cgi_write_callback(int, short, void *);
 static void client_write_callback(client_t *, int);
+static void client_start_done(client_t *, int);
 static void client_read_callback(int, short, void *);
 static void setup_cgi_environment(client_t *, GPtrArray *);
 static int spawn_cgi(
@@ -444,8 +445,8 @@ int		 ret;
 		 * Don't let CGIs set certain headers which would confuse
 		 * the client.
 		 */
-		if (!strcmp(header, "Connection") ||
-		    !strcmp(header, "Transfer-Encoding"))
+		if (!strcasecmp(header, "Connection") ||
+		    !strcasecmp(header, "Transfer-Encoding"))
 			continue;
 
 		g_hash_table_replace(client->request->cgi_headers,
@@ -467,12 +468,24 @@ int		 ret;
 		client_add_header(client, header, value);
 	
 	client->request->cgi_state = CGI_READ_BODY;
-	client_start_response(client, client_write_callback);
+	client_start_response(client, client_start_done);
+}
+
+void
+client_start_done(
+	client_t	*client,
+	int		 error
+)
+{
+	if (error) {
+		client_error(client, "CGI write: %s", strerror(errno));
+		client_abort(client);
+		return;
+	}
 
 	evbuffer_add_buffer(client->wrbuf, client->request->cgi_buffer);
 	client_drain(client, client_write_callback);
 }
-
 
 void
 client_write_callback(
