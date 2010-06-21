@@ -348,6 +348,13 @@ char		*ims, *ext;
 		goto err;
 	}
 
+	if (curconf->public_only &&
+	    ((sb.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) != (S_IRUSR | S_IRGRP | S_IROTH))) {
+		/* Only serve publicly-readable files */
+		client_send_error(client, HTTP_FORBIDDEN);
+		goto err;
+	}
+
 	/* Check for If-Modified-Since */
 	if ((ims = g_hash_table_lookup(req->headers, "If-Modified-Since")) != NULL) {
 	struct tm	stm;

@@ -35,7 +35,12 @@ max-clients = 10000
 # Use sendfile() to improve static file performance.  Only available on
 # FreeBSD.  Note: sendfile() performs poorly on FreeBSD (at least 8.0) when 
 # using a ZFS filesystem.  It should be disabled in that situation.
-use-sendfile = "yes"
+use-sendfile = yes
+
+# Only serve files which are publicly readable (user, group and other).
+# This can prevent accidentally serving private files which are readable
+# by the web server.
+public-only = yes
 
 # IP address to listen on; can specify several.
 listen "0.0.0.0:80" {

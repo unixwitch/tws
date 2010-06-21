@@ -124,6 +124,7 @@ static cfg_opt_t opts[] = {
 	CFG_INT("nprocs", 0, CFGF_NONE),
 	CFG_INT("max-request-size", 1024 * 8, CFGF_NONE),
 	CFG_STR("default-virtual-host", 0, CFGF_NONE),
+	CFG_BOOL("public-only", 0, CFGF_NONE),
 	CFG_BOOL("use-sendfile", 
 #ifdef __FreeBSD__
 			cfg_true,
@@ -344,6 +345,7 @@ char		*s;
 	tcfg->nfiles = cfg_getint(cfg, "nfiles");
 	tcfg->maxclients = cfg_getint(cfg, "max-clients");
 	tcfg->nprocs = cfg_getint(cfg, "nprocs");
+	tcfg->public_only = cfg_getbool(cfg, "public-only");
 	if (tcfg->nprocs == 0) {
 		tcfg->nprocs = sysconf(_SC_NPROCESSORS_ONLN);
 		log_notice("Detected %d CPUs", tcfg->nprocs);

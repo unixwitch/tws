@@ -67,6 +67,7 @@ typedef struct {
 	int		 nprocs;
 	off_t		 maxrq;
 	vhost_t		*defvhost;
+	int		 public_only;
 } tws_config_t;
 
 tws_config_t	*curconf;
