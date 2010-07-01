@@ -1,11 +1,11 @@
-Toolserver Web Server
-=====================
+TCX Web Server
+==============
 
 NOTE: This software is still in development, and is NOT suitable for use
       on production systems.
 
-This is the Toolserver Web Server, a highly scalable single-threaded HTTP 
-server designed for multi-user web hosting systems.
+This is the TCX Web Server, a highly scalable single-threaded HTTP server
+designed for multi-user web hosting systems.
 
 TWS has the following features:
 
@@ -14,6 +14,7 @@ TWS has the following features:
 - zlib/gzip response compression
 - CGI execution by MIME type or directory
 - suexec (setuid) CGI execution
+- multiple processes for SMP systems
 
 The following features are planned:
 
@@ -51,4 +52,4 @@ TWS is distributed under the following license:
   freely. This software is provided 'as-is', without any express or implied
   warranty.
 
-	-- River Tarnell <river@TCX.ORG.UK>
+	-- River Tarnell <river@tamara.tcx.org.uk>
